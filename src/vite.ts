@@ -16,7 +16,7 @@ import {
 /**
  * Everything `tanstackRouter` accepts, minus the two options this plugin owns:
  * `target` is always `'vue'`, and `addExtensions` is what makes the block's
- * `Route` resolvable by TypeScript.
+ * route (as `Route`) resolvable by TypeScript.
  */
 export type TanstackRouterSfcOptions = Omit<
 	Partial<Config>,
@@ -46,8 +46,8 @@ function toArray<T>(value: T | Array<T>): Array<T> {
 /**
  * TanStack Router for Vue with single-file routes.
  *
- * A route is one `.vue` file whose `<router lang="ts">` block exports the
- * `Route`; the SFC itself is the route's component. Drop-in replacement for
+ * A route is one `.vue` file whose `<router lang="ts">` block default-exports
+ * the route; the SFC itself is the route's component. Drop-in replacement for
  * `tanstackRouter({ target: 'vue' })` - route generation, watching and code
  * splitting stay with the official plugin, which this composes - and the
  * `x.ts` + `x.component.vue` convention keeps working alongside it.
@@ -89,9 +89,9 @@ export function tanstackRouterSfc(
 
 	/**
 	 * `addExtensions` makes the generated tree import `./routes/x.vue`, which is
-	 * what TypeScript needs to see the `Route` the block exports. At runtime that
-	 * import must resolve to the `<router>` block alone - importing the SFC
-	 * would pull every page into the entry chunk.
+	 * what TypeScript needs to see the `Route` binding for the default-exported
+	 * route. At runtime that import must resolve to the `<router>` block alone -
+	 * importing the SFC would pull every page into the entry chunk.
 	 */
 	const routeTreeImports: Plugin = {
 		name: 'tanstack-router-sfc:route-tree',
@@ -128,9 +128,9 @@ export function tanstackRouterSfc(
 
 	/**
 	 * Rewrites a route SFC before `@vitejs/plugin-vue` parses it: the
-	 * `<router>` block becomes a `<script>` shim re-exporting `Route` from the
-	 * block's own module, so `Route` is in scope in `<script setup>` and is a
-	 * named export of the `.vue` module.
+	 * `<router>` block becomes a `<script>` shim importing the default-exported
+	 * route as `Route` from the block's own module, so `Route` is in scope in
+	 * `<script setup>` and is a named export of the `.vue` module.
 	 */
 	const routeSfc: Plugin = {
 		name: 'tanstack-router-sfc:sfc',
@@ -262,7 +262,8 @@ export function tanstackRouterSfc(
 				...routerOptions,
 				target: 'vue',
 				// Keeps `.vue` on the tree's eager imports so TypeScript resolves
-				// the block's `Route`. Pairs keep their `.ts`, which is fine:
+				// the block's default-exported route as `Route`. Pairs keep their
+				// `.ts`, which is fine:
 				// `@vue/tsconfig` allows importing TS extensions and the generated
 				// tree is `@ts-nocheck` anyway.
 				addExtensions: true,

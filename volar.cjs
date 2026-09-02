@@ -8,7 +8,8 @@
  * Vue extension:
  *   - diagnostics inside the block, mapped to the real `.vue` lines
  *   - `Route` in scope inside `<script setup>` (not in `<template>`, matching
- *     what a plain `<script>` block does at runtime)
+ *     what a plain `<script>` block does at runtime) - the block's
+ *     `export default` is bound as `Route`
  *   - a typed `Route` export for `routeTree.gen.ts` to import
  *
  * CommonJS on purpose: both hosts load plugins with `require`.
@@ -54,13 +55,30 @@ const plugin = (ctx) => {
 			)
 			at = at === -1 ? 1 : at + 1
 
-			embeddedCode.content.splice(
-				at,
-				0,
-				'\n',
-				[block.content, block.name, 0, CODE_FEATURES],
-				'\n'
-			)
+			const content = block.content
+			const match = /export\s+default\b/.exec(content)
+			const segments = ['\n']
+			if (match) {
+				const start = match.index
+				const end = start + match[0].length
+				if (start > 0) {
+					segments.push([content.slice(0, start), block.name, 0, CODE_FEATURES])
+				}
+				// Bind as `Route` without shifting the mapped offsets after `default`.
+				segments.push('export const Route =')
+				if (end < content.length) {
+					segments.push([
+						content.slice(end),
+						block.name,
+						end,
+						CODE_FEATURES
+					])
+				}
+			} else {
+				segments.push([content, block.name, 0, CODE_FEATURES])
+			}
+			segments.push('\n')
+			embeddedCode.content.splice(at, 0, ...segments)
 		}
 	}
 }

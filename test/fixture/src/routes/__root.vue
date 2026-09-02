@@ -9,5 +9,5 @@ import { Outlet } from '@tanstack/vue-router'
 <router lang="ts">
 import { createRootRoute } from '@tanstack/vue-router'
 
-export const Route = createRootRoute({})
+export default createRootRoute({})
 </router>

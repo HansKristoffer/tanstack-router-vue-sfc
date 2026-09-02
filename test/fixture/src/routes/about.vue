@@ -5,7 +5,7 @@
 <router lang="ts">
 import { createFileRoute } from '@tanstack/vue-router'
 
-export const Route = createFileRoute('/about')({
+export default createFileRoute('/about')({
 	validateSearch: (search: Record<string, unknown>) => ({
 		q: typeof search.q === 'string' ? search.q : undefined
 	})

@@ -96,8 +96,8 @@ export function parseRouteSfc(
 }
 
 /**
- * Replaces the `<router>` block with a `<script>` shim that re-exports `Route`
- * from the block's virtual module.
+ * Replaces the `<router>` block with a `<script>` shim that imports the
+ * default-exported route as `Route` from the block's virtual module.
  *
  * The rewrite preserves the file's line count so `<template>` and
  * `<script setup>` diagnostics and source maps keep pointing at the right
@@ -153,7 +153,8 @@ export function buildRouterModule(
 	if (!sfc.block) return null
 
 	const lines: Array<string> = [
-		'\n'.repeat(sfc.block.startLine - 1) + sfc.block.content
+		'\n'.repeat(sfc.block.startLine - 1) +
+			bindDefaultExportAsRoute(sfc.block.content)
 	]
 
 	if (sfc.hasTemplate || sfc.hasScriptSetup) {
@@ -166,17 +167,25 @@ export function buildRouterModule(
 	return `${lines.join('\n')}\n`
 }
 
-const ROUTE_EXPORT_REGEX = /export\s+(?:const|let|var)\s+Route\b/
+const DEFAULT_EXPORT_REGEX = /export\s+default\b/
 const CREATE_FILE_ROUTE_REGEX =
 	/createFileRoute\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1\s*\)/
 const CREATE_ROOT_ROUTE_REGEX = /createRootRoute(?:WithContext)?\s*[(<]/
+
+/**
+ * Turns the block's `export default` into a `Route` binding so the generated
+ * tree (`import { Route }`) and `Route.update(...)` keep working.
+ */
+function bindDefaultExportAsRoute(content: string): string {
+	return content.replace(DEFAULT_EXPORT_REGEX, 'export const Route =')
+}
 
 export type RouterBlockCheck =
 	| { ok: true; routeId: string | null }
 	| { ok: false; message: string; actualRouteId?: string }
 
 /**
- * Validates a `<router>` block: it must export `Route` from exactly one
+ * Validates a `<router>` block: it must default-export exactly one
  * `createFileRoute('<path>')` (or `createRootRoute*` for `__root`), and the
  * path must be the one the file's location implies.
  */
@@ -184,10 +193,10 @@ export function checkRouterBlock(
 	blockContent: string,
 	expectedRouteId: string | undefined
 ): RouterBlockCheck {
-	if (!ROUTE_EXPORT_REGEX.test(blockContent)) {
+	if (!DEFAULT_EXPORT_REGEX.test(blockContent)) {
 		return {
 			ok: false,
-			message: `the block must contain \`export const Route = ...\`.`
+			message: `the block must \`export default createFileRoute('<path>')\` (or \`createRootRoute*\`).`
 		}
 	}
 

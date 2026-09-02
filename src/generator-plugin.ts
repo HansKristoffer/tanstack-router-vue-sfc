@@ -43,8 +43,8 @@ function scaffold(
 	isRoot: boolean
 ): string {
 	const definition = isRoot
-		? 'export const Route = createRootRoute({})'
-		: `export const Route = createFileRoute(${quote(routePath)})({})`
+		? 'export default createRootRoute({})'
+		: `export default createFileRoute(${quote(routePath)})({})`
 	const imported = isRoot ? 'Outlet, createRootRoute' : 'createFileRoute'
 	const body = isRoot ? '\t<Outlet />' : `\t<div>Hello ${routePath}!</div>`
 
@@ -132,7 +132,7 @@ export function routerBlockGeneratorPlugin(options: {
 			if (!parsed.block) {
 				throw new Error(
 					`${node.fullPath} is a route file but has no <${blockType} lang="ts"> block.\n` +
-						`Add one that exports \`Route\`, or exclude the file with the "${options.routeFileIgnorePrefix}" prefix.`
+						`Add one that default-exports the route, or exclude the file with the "${options.routeFileIgnorePrefix}" prefix.`
 				)
 			}
 

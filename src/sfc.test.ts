@@ -19,7 +19,7 @@ const title = Route.useLoaderData()
 <router lang="ts">
 import { createFileRoute } from '@tanstack/vue-router'
 
-export const Route = createFileRoute('/posts/$postId')({
+export default createFileRoute('/posts/$postId')({
 	loader: () => 'hi'
 })
 </router>
@@ -48,7 +48,7 @@ describe('parseRouteSfc', () => {
 
 	test('rejects a block without lang="ts"', () => {
 		expect(() =>
-			parseRouteSfc('<router>export const Route = 1</router>')
+			parseRouteSfc('<router>export default 1</router>')
 		).toThrow(RouteSfcError)
 	})
 
@@ -83,7 +83,7 @@ const shared = 1
 </script>
 
 <router lang="ts">
-export const Route = createFileRoute('/x')({})
+export default createFileRoute('/x')({})
 </router>
 `
 		const out = rewriteRouteSfc(source, {
@@ -102,7 +102,7 @@ export const Route = createFileRoute('/x')({})
 </template>
 
 <router lang="ts">
-export const Route = createFileRoute('/x')({})
+export default createFileRoute('/x')({})
 </router>
 `
 		const out = rewriteRouteSfc(source, {
@@ -138,13 +138,15 @@ describe('buildRouterModule', () => {
 		expect(lines[9]).toBe(
 			"import { createFileRoute } from '@tanstack/vue-router'"
 		)
+		expect(out).toContain('export const Route = createFileRoute')
+		expect(out).not.toContain('export default createFileRoute')
 		expect(out).toContain('lazyRouteComponent as __tsrLazyRouteComponent')
 		expect(out).toContain('import("./x.vue")')
 	})
 
 	test('omits the component wiring when the SFC renders nothing', () => {
 		const out = buildRouterModule(
-			`<router lang="ts">\nexport const Route = createFileRoute('/x')({})\n</router>\n`,
+			`<router lang="ts">\nexport default createFileRoute('/x')({})\n</router>\n`,
 			{
 				filename: 'x.vue',
 				componentSpecifier: './x.vue',
@@ -159,7 +161,7 @@ describe('checkRouterBlock', () => {
 	test('accepts a matching route id', () => {
 		expect(
 			checkRouterBlock(
-				"export const Route = createFileRoute('/posts/$postId')({})",
+				"export default createFileRoute('/posts/$postId')({})",
 				'/posts/$postId'
 			)
 		).toEqual({ ok: true, routeId: '/posts/$postId' })
@@ -167,7 +169,7 @@ describe('checkRouterBlock', () => {
 
 	test('reports a stale route id with the actual value', () => {
 		const result = checkRouterBlock(
-			"export const Route = createFileRoute('/old')({})",
+			"export default createFileRoute('/old')({})",
 			'/new'
 		)
 		expect(result.ok).toBe(false)
@@ -177,10 +179,19 @@ describe('checkRouterBlock', () => {
 	test('accepts the root route without a path', () => {
 		expect(
 			checkRouterBlock(
-				'export const Route = createRootRouteWithContext<Ctx>()({})',
+				'export default createRootRouteWithContext<Ctx>()({})',
 				undefined
 			)
 		).toEqual({ ok: true, routeId: null })
+	})
+
+	test('rejects a named Route export', () => {
+		expect(
+			checkRouterBlock(
+				"export const Route = createFileRoute('/x')({})",
+				'/x'
+			).ok
+		).toBe(false)
 	})
 
 	test('rejects a block that exports nothing', () => {

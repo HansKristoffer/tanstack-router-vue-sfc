@@ -9,7 +9,7 @@ const data = Route.useLoaderData()
 <router lang="ts">
 import { createFileRoute } from '@tanstack/vue-router'
 
-export const Route = createFileRoute('/')({
+export default createFileRoute('/')({
 	loader: () => 'FIXTURE_INDEX_LOADER'
 })
 </router>

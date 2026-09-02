@@ -18,7 +18,7 @@ const post = Route.useLoaderData()
 import { createFileRoute, notFound } from '@tanstack/vue-router'
 import { getPost } from '@/lib/posts'
 
-export const Route = createFileRoute('/posts/$postId')({
+export default createFileRoute('/posts/$postId')({
 	loader: async ({ params }) => {
 		const post = await getPost(params.postId)
 		if (!post) throw notFound()
@@ -63,7 +63,7 @@ Peer dependencies: `vite`, `vue`, `@tanstack/router-plugin`,
 ## Rules
 
 - The block must be `<router lang="ts">` and must
-  `export const Route = createFileRoute('<path>')({ ... })` - exactly one, with
+  `export default createFileRoute('<path>')({ ... })` - exactly one, with
   a string-literal path. `__root.vue` uses `createRootRoute*` instead.
 - A stale path after a rename is **fixed in place** by the generator, the same
   way it fixes `.ts` route files.
@@ -83,7 +83,7 @@ Peer dependencies: `vite`, `vue`, `@tanstack/router-plugin`,
 Route generation, file watching, formatting, code splitting and route HMR are
 the official `tanstackRouter` plugin's job - this composes it with
 `addExtensions: true`, so the generated tree imports `./routes/x.vue` and
-TypeScript can see the `Route` the block exports. On top of that:
+TypeScript can see the block's default-exported route as `Route`. On top of that:
 
 1. a **generator plugin** (`afterTransform`) requires every single-file route
    to have a block, keeps its `createFileRoute('...')` id in sync when the file
@@ -91,9 +91,9 @@ TypeScript can see the `Route` the block exports. On top of that:
 2. **`:route-tree`** rewrites the tree's `./routes/x.vue` imports at transform
    time to `x.vue.tsr-router.ts` - the block alone - so the route tree never
    pulls a component into the entry chunk;
-3. **`:sfc`** replaces the `<router>` block with a `<script>` shim re-exporting
-   `Route` from that module, preserving the file's line count so template and
-   setup diagnostics stay accurate;
+3. **`:sfc`** replaces the `<router>` block with a `<script>` shim that imports
+   the default-exported route as `Route` from that module, preserving the
+   file's line count so template and setup diagnostics stay accurate;
 4. **`:router-block`** serves `x.vue.tsr-router.ts`: the block's TypeScript,
    padded to the original line numbers, plus
    `Route.update({ component: lazyRouteComponent(() => import('./x.vue')) })`.
