@@ -1,0 +1,71 @@
+{
+  "name": "tanstack-router-sfc",
+  "version": "0.1.0",
+  "description": "TanStack Router for Vue with single-file routes: define the route in a <router lang=\"ts\"> block inside the .vue file that renders it.",
+  "type": "module",
+  "main": "src/vite.ts",
+  "exports": {
+    ".": "./src/vite.ts",
+    "./volar": {
+      "require": "./volar.cjs",
+      "default": "./volar.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "volar.cjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepack": "bun run build && bun run scripts/pack-fields.ts dist",
+    "postpack": "bun run scripts/pack-fields.ts source",
+    "lint": "bun run typecheck && biome check",
+    "lint:write": "bun run typecheck && biome check --fix && biome format",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src test"
+  },
+  "keywords": [
+    "vite-plugin",
+    "vue",
+    "tanstack-router",
+    "sfc",
+    "file-based-routing"
+  ],
+  "author": "Hans Kristoffer",
+  "license": "MIT",
+  "homepage": "https://github.com/HansKristoffer/tanstack-router-vue-sfc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HansKristoffer/tanstack-router-vue-sfc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HansKristoffer/tanstack-router-vue-sfc/issues"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@tanstack/router-plugin": "^1.0.0",
+    "@tanstack/vue-router": "^1.0.0",
+    "vite": ">=5.0.0",
+    "vue": "^3.3.0"
+  },
+  "devDependencies": {
+    "@tanstack/router-plugin": "^1.168.23",
+    "@tanstack/vue-router": "^1.170.17",
+    "@types/bun": "^1.4.0",
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tsdown": "^0.22.14",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.5",
+    "vue": "^3.5.40"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
