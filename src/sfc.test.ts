@@ -3,9 +3,9 @@ import {
 	buildRouterModule,
 	checkRouterBlock,
 	parseRouteSfc,
+	RouteSfcError,
 	replaceRouteId,
-	rewriteRouteSfc,
-	RouteSfcError
+	rewriteRouteSfc
 } from './sfc'
 
 const SFC = `<template>
@@ -47,9 +47,9 @@ describe('parseRouteSfc', () => {
 	})
 
 	test('rejects a block without lang="ts"', () => {
-		expect(() =>
-			parseRouteSfc('<router>export default 1</router>')
-		).toThrow(RouteSfcError)
+		expect(() => parseRouteSfc('<router>export default 1</router>')).toThrow(
+			RouteSfcError
+		)
 	})
 
 	test('rejects two blocks', () => {
@@ -187,10 +187,8 @@ describe('checkRouterBlock', () => {
 
 	test('rejects a named Route export', () => {
 		expect(
-			checkRouterBlock(
-				"export const Route = createFileRoute('/x')({})",
-				'/x'
-			).ok
+			checkRouterBlock("export const Route = createFileRoute('/x')({})", '/x')
+				.ok
 		).toBe(false)
 	})
 

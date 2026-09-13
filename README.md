@@ -1,4 +1,4 @@
-# @lullu/tanstack-router-sfc
+# tanstack-router-sfc
 
 TanStack Router for Vue where **one `.vue` file is the whole route**: the route
 definition lives in a `<router lang="ts">` custom block next to the component
@@ -35,7 +35,7 @@ same routes directory, so migration can be gradual.
 
 ```ts
 // vite.config.ts
-import { tanstackRouterSfc } from '@lullu/tanstack-router-sfc'
+import { tanstackRouterSfc } from 'tanstack-router-sfc'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
@@ -47,7 +47,7 @@ export default defineConfig({
 // tsconfig.json - typechecking and IDE support for the block
 {
 	"vueCompilerOptions": {
-		"plugins": ["@lullu/tanstack-router-sfc/volar"]
+		"plugins": ["tanstack-router-sfc/volar"]
 	}
 }
 ```
@@ -121,6 +121,8 @@ bun run typecheck
 bun run build       # tsdown -> dist/
 ```
 
-`npm pack` builds and swaps the entry points to `dist/` (see
-`scripts/pack-fields.ts`); the working tree keeps pointing at the TypeScript
-source.
+Releases are automated: commits on `main` follow
+[Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`,
+`feat!:` for breaking changes), [Release Please](https://github.com/googleapis/release-please)
+keeps a release PR open with the next version and changelog, and merging it
+tags the release and publishes to npm with provenance.

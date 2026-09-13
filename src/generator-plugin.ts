@@ -2,8 +2,8 @@ import fs from 'node:fs'
 import {
 	checkRouterBlock,
 	parseRouteSfc,
-	replaceRouteId,
-	RouteSfcError
+	RouteSfcError,
+	replaceRouteId
 } from './sfc'
 
 /**
