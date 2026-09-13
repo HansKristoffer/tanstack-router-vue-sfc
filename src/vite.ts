@@ -117,8 +117,9 @@ export function tanstackRouterSfc(
 			handler(code, id) {
 				if (normalize(stripQuery(id)) !== generatedRouteTreePath) return null
 				const next = code.replace(
-					/from '([^']*\.vue)'/g,
-					(_match, source: string) => `from '${source}${ROUTER_MODULE_SUFFIX}'`
+					/from (['"])([^'"]*\.vue)\1/g,
+					(_match, quote: string, source: string) =>
+						`from ${quote}${source}${ROUTER_MODULE_SUFFIX}${quote}`
 				)
 				if (next === code) return null
 				return { code: next, map: { mappings: '' } }
@@ -193,12 +194,14 @@ export function tanstackRouterSfc(
 			const previous = blockCache.get(file)
 			const current = readBlockContent(file)
 			if (current !== null) blockCache.set(file, current)
-			if (previous === undefined || previous === current) return
+			if (current !== null && previous === current) return
 
 			// A changed route definition has to be re-evaluated by the router,
 			// which is built once at startup. Propagating the invalidation stops
 			// at the first component that accepts HMR, so ask for a reload
-			// outright - the same thing editing a `.ts` route file does.
+			// outright - the same thing editing a `.ts` route file does. A block
+			// that no longer parses (`current === null`) reloads too, so the
+			// error reaches the overlay instead of the stale route staying live.
 			const hot = ctx.server.hot ?? ctx.server.ws
 			hot.send({ type: 'full-reload', path: '*' })
 			return []

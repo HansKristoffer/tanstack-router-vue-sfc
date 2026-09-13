@@ -4,6 +4,7 @@ import path from 'node:path'
 import vue from '@vitejs/plugin-vue'
 import { build, type Rollup } from 'vite'
 import { tanstackRouterSfc } from '../src/vite'
+import { copyFixture, removeFixture } from './fixture-copy'
 
 /**
  * End-to-end guard: builds a fixture app with the real plugin chain.
@@ -12,8 +13,6 @@ import { tanstackRouterSfc } from '../src/vite'
  * because everything it asserts depends on how the official generator emits
  * the route tree.
  */
-
-const FIXTURE = path.join(import.meta.dir, 'fixture')
 
 let outDir: string
 let chunks: Array<Rollup.OutputChunk>
@@ -24,11 +23,7 @@ function chunkContaining(marker: string): Rollup.OutputChunk | undefined {
 }
 
 beforeAll(async () => {
-	// Build a copy, so the generated route tree never lands in the fixture.
-	// It has to sit inside the package (not in $TMPDIR) or the fixture cannot
-	// resolve `vue` / `@tanstack/vue-router` from the monorepo's node_modules.
-	outDir = fs.mkdtempSync(path.join(import.meta.dir, '..', '.test-build-'))
-	fs.cpSync(FIXTURE, outDir, { recursive: true })
+	outDir = copyFixture()
 
 	const result = (await build({
 		root: outDir,
@@ -47,9 +42,7 @@ beforeAll(async () => {
 	)
 }, 60_000)
 
-afterAll(() => {
-	if (outDir) fs.rmSync(outDir, { recursive: true, force: true })
-})
+afterAll(() => removeFixture(outDir))
 
 describe('generated route tree', () => {
 	test('keeps the .vue extension on single-file route imports', () => {

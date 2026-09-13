@@ -1,5 +1,8 @@
 # tanstack-router-sfc
 
+[![CI](https://github.com/HansKristoffer/tanstack-router-vue-sfc/actions/workflows/ci.yml/badge.svg)](https://github.com/HansKristoffer/tanstack-router-vue-sfc/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/tanstack-router-sfc)](https://www.npmjs.com/package/tanstack-router-sfc)
+
 TanStack Router for Vue where **one `.vue` file is the whole route**: the route
 definition lives in a `<router lang="ts">` custom block next to the component
 that renders it.
