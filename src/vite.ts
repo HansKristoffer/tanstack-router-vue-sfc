@@ -8,9 +8,9 @@ import {
 	buildRouterModule,
 	DEFAULT_BLOCK_TYPE,
 	parseRouteSfc,
-	rewriteRouteSfc,
 	ROUTER_MODULE_SUFFIX,
-	RouteSfcError
+	RouteSfcError,
+	rewriteRouteSfc
 } from './sfc'
 
 /**

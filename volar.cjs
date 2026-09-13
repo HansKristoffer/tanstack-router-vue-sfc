@@ -15,7 +15,7 @@
  * CommonJS on purpose: both hosts load plugins with `require`.
  *
  * Register it in tsconfig.json:
- *   "vueCompilerOptions": { "plugins": ["@lullu/tanstack-router-sfc/volar"] }
+ *   "vueCompilerOptions": { "plugins": ["tanstack-router-sfc/volar"] }
  */
 
 const CODE_FEATURES = {
@@ -67,12 +67,7 @@ const plugin = (ctx) => {
 				// Bind as `Route` without shifting the mapped offsets after `default`.
 				segments.push('export const Route =')
 				if (end < content.length) {
-					segments.push([
-						content.slice(end),
-						block.name,
-						end,
-						CODE_FEATURES
-					])
+					segments.push([content.slice(end), block.name, end, CODE_FEATURES])
 				}
 			} else {
 				segments.push([content, block.name, 0, CODE_FEATURES])

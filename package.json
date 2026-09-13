@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "TanStack Router for Vue with single-file routes: define the route in a <router lang=\"ts\"> block inside the .vue file that renders it.",
   "type": "module",
-  "main": "src/vite.ts",
+  "main": "./dist/vite.mjs",
+  "types": "./dist/vite.d.mts",
   "exports": {
-    ".": "./src/vite.ts",
-    "./volar": {
-      "require": "./volar.cjs",
-      "default": "./volar.cjs"
+    ".": {
+      "types": "./dist/vite.d.mts",
+      "default": "./dist/vite.mjs"
     },
+    "./volar": "./volar.cjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -20,12 +21,11 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "prepack": "bun run build && bun run scripts/pack-fields.ts dist",
-    "postpack": "bun run scripts/pack-fields.ts source",
+    "prepublishOnly": "bun run build",
     "lint": "bun run typecheck && biome check",
-    "lint:write": "bun run typecheck && biome check --fix && biome format",
+    "lint:write": "bun run typecheck && biome check --write",
     "typecheck": "tsc --noEmit",
-    "test": "bun test src test"
+    "test": "bun test"
   },
   "keywords": [
     "vite-plugin",
@@ -55,6 +55,7 @@
     "vue": "^3.3.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.13",
     "@tanstack/router-plugin": "^1.168.23",
     "@tanstack/vue-router": "^1.170.17",
     "@types/bun": "^1.4.0",
