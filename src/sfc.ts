@@ -167,10 +167,15 @@ export function buildRouterModule(
 	return `${lines.join('\n')}\n`
 }
 
-const DEFAULT_EXPORT_REGEX = /export\s+default\b/
+// Anchored to the start of a line so an `export default` mentioned in a
+// comment or string cannot be picked up (block comments are the one gap).
+const DEFAULT_EXPORT_REGEX = /^[ \t]*export\s+default\b/m
+// The path is only read off the default export itself - a stray
+// `createFileRoute('/old')` in a comment above it must not win.
 const CREATE_FILE_ROUTE_REGEX =
-	/createFileRoute\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1\s*\)/
-const CREATE_ROOT_ROUTE_REGEX = /createRootRoute(?:WithContext)?\s*[(<]/
+	/^[ \t]*export\s+default\s+createFileRoute\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1\s*\)/m
+const CREATE_ROOT_ROUTE_REGEX =
+	/^[ \t]*export\s+default\s+createRootRoute(?:WithContext)?\s*[(<]/m
 
 /**
  * Turns the block's `export default` into a `Route` binding so the generated

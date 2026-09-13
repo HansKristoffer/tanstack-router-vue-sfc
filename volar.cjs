@@ -16,6 +16,10 @@
  *
  * Register it in tsconfig.json:
  *   "vueCompilerOptions": { "plugins": ["tanstack-router-sfc/volar"] }
+ * or, with a custom block name (matching the Vite plugin's `blockType`):
+ *   "vueCompilerOptions": {
+ *     "plugins": [{ "name": "tanstack-router-sfc/volar", "blockType": "route" }]
+ *   }
  */
 
 const CODE_FEATURES = {
@@ -29,9 +33,9 @@ const CODE_FEATURES = {
 
 const SCRIPT_CODE_ID = /^script_(ts|js|tsx|jsx)$/
 
-/** @type {import('@vue/language-core').VueLanguagePlugin} */
+/** @type {import('@vue/language-core').VueLanguagePlugin<{ blockType?: string }>} */
 const plugin = (ctx) => {
-	const blockType = ctx?.config?.blockType ?? 'router'
+	const blockType = ctx.config.blockType ?? 'router'
 
 	return {
 		version: 2.2,
@@ -56,7 +60,8 @@ const plugin = (ctx) => {
 			at = at === -1 ? 1 : at + 1
 
 			const content = block.content
-			const match = /export\s+default\b/.exec(content)
+			const match = /^[ \t]*export\s+default\b/m.exec(content)
+			/** @type {Array<import('@vue/language-core').Code>} */
 			const segments = ['\n']
 			if (match) {
 				const start = match.index

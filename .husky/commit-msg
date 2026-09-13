@@ -1,0 +1,5 @@
+# Release Please reads Conventional Commits to pick the next version.
+grep -qE '^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([^)]+\))?!?: ' "$1" || {
+	echo 'commit message must follow Conventional Commits, e.g. "feat: add x" or "fix(hmr): reload on y"' >&2
+	exit 1
+}

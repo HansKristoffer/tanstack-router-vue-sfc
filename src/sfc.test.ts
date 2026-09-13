@@ -206,3 +206,24 @@ describe('replaceRouteId', () => {
 		expect(countLines(out)).toBe(countLines(source))
 	})
 })
+
+describe('comment safety', () => {
+	test('a createFileRoute mentioned in a comment does not win', () => {
+		const content = `// migrated from createFileRoute('/old')\nexport default createFileRoute('/new')({})`
+		expect(checkRouterBlock(content, '/new')).toEqual({
+			ok: true,
+			routeId: '/new'
+		})
+	})
+
+	test('an export default mentioned in a comment is not rebound', () => {
+		const source = `<router lang="ts">\n// we export default here\nexport default createFileRoute('/x')({})\n</router>\n`
+		const out = buildRouterModule(source, {
+			filename: 'x.vue',
+			componentSpecifier: './x.vue',
+			routerPackage: '@tanstack/vue-router'
+		}) as string
+		expect(out).toContain('// we export default here')
+		expect(out).toContain('export const Route = createFileRoute')
+	})
+})
