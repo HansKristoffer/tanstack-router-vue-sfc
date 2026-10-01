@@ -26,7 +26,8 @@
     "lint:write": "bun run typecheck && biome check --write",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "prepare": "husky"
+    "prepare": "husky",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "keywords": [
     "vite-plugin",

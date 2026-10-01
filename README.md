@@ -124,8 +124,6 @@ bun run typecheck
 bun run build       # tsdown -> dist/
 ```
 
-Releases are automated: commits on `main` follow
-[Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`,
-`feat!:` for breaking changes), [Release Please](https://github.com/googleapis/release-please)
-keeps a release PR open with the next version and changelog, and merging it
-tags the release and publishes to npm with provenance.
+## Releasing
+
+Squash PRs with conventional titles (`fix:`, `feat:`, or `feat!:`). Release Please keeps the version and changelog in a release PR; merge that PR to publish with release notes and npm provenance. See [release and recovery instructions](docs/releasing.md).
