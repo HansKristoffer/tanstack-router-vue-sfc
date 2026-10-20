@@ -166,37 +166,52 @@ const consoleFeedback: FormFeedback = {
 }
 
 /**
+ * How a form becomes the mutation's input: the state itself, or what
+ * `buildInput` makes of it. `buildInput` is required when the state is not
+ * already a valid input.
+ */
+export type FormSubmitInput<TState, TInput, TResult> = {
+	submit: (input: TInput) => Promise<TResult>
+} & ([TState] extends [TInput]
+	? { buildInput?: (state: TState) => NoInfer<TInput> }
+	: { buildInput: (state: TState) => NoInfer<TInput> })
+
+type FormSubmitOptions<TResult> = {
+	/** Shown on success (outside a save scope). */
+	success?: string
+	errorTitle?: string
+	/** After a successful submit, with its result: invalidate, close, navigate. */
+	onDone?: (result: TResult) => void
+}
+
+/**
  * Submit a form through `submit` (a mutation), reporting through the app's
  * `FormFeedback`. Resolves `true` on success. Inside a save scope the scope
  * announces the save, so `success` is not shown per section.
  */
 export function useFormSubmit<
 	TState extends Record<string, unknown>,
+	TInput,
 	TResult
->(options: {
-	initialState: TState
-	submit: (input: unknown) => Promise<TResult>
-	/** The mutation input, when it is not the form state itself. */
-	buildInput?: (state: TState) => unknown
-	/** Shown on success (outside a save scope). */
-	success?: string
-	errorTitle?: string
-	/** After a successful submit, with its result: invalidate, close, navigate. */
-	onDone?: (result: TResult) => void
-}) {
+>(
+	options: { initialState: TState } & FormSubmitInput<TState, TInput, TResult> &
+		FormSubmitOptions<TResult>
+) {
 	const feedback = inject(formFeedbackKey, null)?.() ?? consoleFeedback
 	const saveScope = useOptionalSaveScopeController()
 	const isPending = ref(false)
 	const state = isReactive(options.initialState)
 		? options.initialState
 		: (reactive({ ...options.initialState }) as TState)
+	// Without `buildInput` the state is an input: `FormSubmitInput` checked it.
+	const toInput =
+		options.buildInput ?? ((state: TState) => state as unknown as TInput)
 
-	async function onSubmit(values?: unknown) {
+	/** `values`: the form's validated data, when its submit event carries it. */
+	async function onSubmit(values?: TState) {
 		isPending.value = true
 		try {
-			const result = await options.submit(
-				options.buildInput ? options.buildInput(state) : (values ?? state)
-			)
+			const result = await options.submit(toInput(values ?? state))
 			if (options.success && !saveScope) feedback.success(options.success)
 			options.onDone?.(result)
 			return true
@@ -219,24 +234,22 @@ export function useFormSubmit<
 export function useSettingsFormSection<
 	TEntity,
 	TForm extends Record<string, unknown>,
+	TInput,
 	TResult
->(options: {
-	entity: MaybeRefOrGetter<TEntity | null | undefined>
-	entityToForm: (entity: TEntity) => TForm
-	createEmptyForm: () => TForm
-	submit: (input: unknown) => Promise<TResult>
-	buildInput?: (state: TForm) => unknown
-	success?: string
-	errorTitle?: string
-	onDone?: (result: TResult) => void
-}) {
+>(
+	options: {
+		entity: MaybeRefOrGetter<TEntity | null | undefined>
+		entityToForm: (entity: TEntity) => TForm
+		createEmptyForm: () => TForm
+	} & FormSubmitInput<TForm, TInput, TResult> &
+		FormSubmitOptions<TResult>
+) {
 	const { form, isDirty, reset, commit } = useEntityForm(options)
-	const { onSubmit: submit, isPending } = useFormSubmit({
-		...options,
-		initialState: form
-	})
+	const { onSubmit: submit, isPending } = useFormSubmit<TForm, TInput, TResult>(
+		Object.assign({}, options, { initialState: form })
+	)
 
-	async function onSubmit(values?: unknown) {
+	async function onSubmit(values?: TForm) {
 		const ok = await submit(values)
 		if (ok) commit()
 		return ok

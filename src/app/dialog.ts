@@ -9,7 +9,11 @@ import {
 } from 'vue'
 
 /** A named dialog `useOpenDialog` can open. */
-export type DialogDefinition<Name extends string = string, Data = unknown> = {
+export type DialogDefinition<
+	Name extends string = string,
+	Data = unknown,
+	Result = unknown
+> = {
 	name: Name
 	/** The dialog body, rendered inside the host. Usually `defineAsyncComponent`. */
 	component: Component
@@ -20,6 +24,8 @@ export type DialogDefinition<Name extends string = string, Data = unknown> = {
 	hostProps?: () => Record<string, unknown>
 	/** Type-only: what the body takes as props. `data: {} as MyData`. */
 	data?: Data
+	/** Type-only: what the body closes with. `result: {} as { id: string }`. */
+	result?: Result
 }
 
 /** The slice of Nuxt UI's `useOverlay()` the dialogs use. */
@@ -29,12 +35,12 @@ export type DialogOverlay = {
 	}
 }
 
-type DataOf<D, Name> =
-	D extends DialogDefinition<infer N, infer Data>
-		? Name extends N
-			? Data
-			: never
-		: never
+type DataOf<D, Name> = D extends { name: Name; data?: infer Data }
+	? Exclude<Data, undefined>
+	: never
+type ResultOf<D, Name> = D extends { name: Name; result?: infer Result }
+	? Exclude<Result, undefined>
+	: never
 
 /** `name` or `name::<json data>` - what the dialog search param holds. */
 export function formatDialogParam(name: string, data?: unknown): string {
@@ -84,7 +90,7 @@ type OpenDialogOptions = {
  */
 export function createDialogs<
 	const D extends ReadonlyArray<DialogDefinition>,
-	Name extends D[number]['name'] = D[number]['name']
+	Confirm extends D[number]['name'] = never
 >(options: {
 	dialogs: D
 	host: Component
@@ -92,7 +98,7 @@ export function createDialogs<
 	/** The search param. Default `openDialog`. */
 	searchKey?: string
 	/** A registered dialog that resolves `true` when confirmed, for `useConfirmAction`. */
-	confirm?: Name
+	confirm?: Confirm
 	/** Called for a name no dialog is registered under (a stale deep link). */
 	onUnknownDialog?: (name: string) => void
 }) {
@@ -115,17 +121,17 @@ export function createDialogs<
 
 	/**
 	 * Open a dialog by name. Resolves with what the dialog closed with, or
-	 * `undefined` when no dialog has that name. Call during setup; pass
+	 * `undefined` when it was dismissed or no dialog has that name. Call during setup; pass
 	 * `router` to use one outside a component.
 	 */
 	function useOpenDialog(router: AnyRouter = useRouter()) {
 		const overlay = options.useOverlay()
 
-		return async <N extends Name>(
+		return async <N extends D[number]['name']>(
 			name: N,
 			data?: DataOf<D[number], N>,
 			openOptions?: OpenDialogOptions
-		): Promise<unknown> => {
+		): Promise<ResultOf<D[number], N> | undefined> => {
 			const def = options.dialogs.find((d) => d.name === name)
 			if (!def) {
 				options.onUnknownDialog?.(name)
@@ -142,7 +148,7 @@ export function createDialogs<
 				component: markRaw(def.component),
 				data
 			})
-			const value = await result
+			const value = (await result) as ResultOf<D[number], N> | undefined
 			// Awaited so the cleanup cannot race (and cancel) a navigation the
 			// caller makes as soon as the result resolves.
 			if (param) await setSearchParam(router, undefined)
@@ -156,7 +162,7 @@ export function createDialogs<
 		const name = options.confirm
 		if (!name)
 			throw new Error('createDialogs: pass `confirm` to use useConfirmAction()')
-		return async (data: DataOf<D[number], typeof name>) =>
+		return async (data: DataOf<D[number], Confirm>) =>
 			(await open(name, data)) === true
 	}
 
@@ -170,7 +176,7 @@ export function createDialogs<
 			if (typeof raw !== 'string' || !raw) return
 			const { name, data } = parseDialogParam(raw)
 			// The name comes from the URL; an unknown one is a no-op in `open`.
-			void open(name as Name, data as never)
+			void open(name, data as never)
 		})
 	}
 
