@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v1.0.2...v1.1.0) (2026-10-20)
+
+
+### Features
+
+* **app:** add a Vue app kit for TanStack Router + Nuxt UI apps ([a3464f8](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/a3464f8ea39e5e466c57352235def66f6c6715e3))
+
 ## [1.0.2](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v1.0.1...v1.0.2) (2026-10-20)
 
 
