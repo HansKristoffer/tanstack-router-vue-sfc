@@ -116,6 +116,39 @@ Single-file routes are split by construction, so you do not need it for them.
 It is passed through to the official plugin unchanged, which is what still
 splits inline `component:` options in `.ts` route files.
 
+## App kit: `tanstack-router-sfc/app`
+
+Runtime logic for Vue apps on TanStack Router with [Nuxt UI](https://ui.nuxt.com).
+It ships no components: the app keeps its design-system shells and wires them
+to these. Every function that navigates uses `useRouter()` from the component
+it runs in, or takes a `router`.
+
+| Area | Exports |
+|---|---|
+| Nuxt UI on TanStack Router | `vueRouterShimOptions(history)` - `app.use(createRouter(vueRouterShimOptions(createWebHistory())))` |
+| URL search state | `useQueryParam`, `useRouteSearchModels`, `useRouteSearchSync`, `useRouterPush`, `searchFlag`, `defineStaticData` |
+| Route loading | `routeLoadingMode`, `trackRouteLoading(router)` |
+| Dialogs opened by URL | `createDialogs({ dialogs, host, useOverlay, confirm })` -> `useOpenDialog`, `useConfirmAction`, `useDialogDeepLink`; `useDialogHost` for the host component |
+| Maintenance / API down | `createMaintenanceMode({ probe })`, `parseApiError` |
+| Forms | `formStateFromSchema`, `useEntityForm`, `useFormSubmit`, `useSettingsFormSection`, `provideSaveScope` / `useSaveSection`, `useFormFieldModel`, `useFieldHighlight`, `formStateKey`, `formIdKey` |
+
+Toasts and translations are the app's: provide them once.
+
+```ts
+app.provide(formFeedbackKey, () => {
+	const toast = useToast()
+	const { t } = useI18n()
+	return {
+		success: (title) => toast.add({ color: 'success', title }),
+		error: (error, title) =>
+			toast.add({ color: 'error', title: title ?? t('saveFailed') })
+	}
+})
+```
+
+`vue-router` (the shim) and `zod` (`formStateFromSchema` types) are optional
+peer dependencies; the kit imports neither at runtime.
+
 ## Development
 
 ```sh

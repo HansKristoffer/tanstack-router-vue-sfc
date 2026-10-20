@@ -1,16 +1,18 @@
 import { defineConfig } from 'tsdown'
 
 export default defineConfig({
-	entry: ['src/vite.ts'],
+	entry: { vite: 'src/vite.ts', app: 'src/app/index.ts' },
 	format: ['esm'],
 	dts: true,
 	clean: true,
-	// Everything the plugin talks to is a peer dependency of the host app.
+	// Everything the package talks to is a peer dependency of the host app.
 	deps: {
 		neverBundle: [
 			'vite',
 			'vue',
 			'vue/compiler-sfc',
+			'vue-router',
+			'zod',
 			'@tanstack/router-plugin',
 			'@tanstack/router-plugin/vite',
 			'@tanstack/vue-router'
