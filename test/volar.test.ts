@@ -29,12 +29,39 @@ export default createFileRoute('/typo')({
 </router>
 `
 
+// Before 1.0.2 the block shared <script setup>'s scope: the shared `ref`
+// import and the two `label` consts were "Duplicate identifier" errors.
+const SHARED_ROUTE = `<template><p>{{ label }}</p></template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { createFileRoute } from '@tanstack/vue-router'
+const label = ref(String(Route.useLoaderData().value))
+</script>
+
+<router lang="ts">
+import { createFileRoute, redirect } from '@tanstack/vue-router'
+import { ref } from 'vue'
+import type { Ref } from 'vue'
+
+const label: Ref<number> = ref(1)
+
+export default createFileRoute('/shared')({
+	beforeLoad: () => {
+		if (label.value < 0) throw redirect({ to: '/' })
+	},
+	loader: () => label
+})
+</router>
+`
+
 let root: string
 let errors: Array<string>
 
 beforeAll(async () => {
 	root = copyFixture()
 	fs.writeFileSync(path.join(root, 'src/routes/typo.vue'), TYPO_ROUTE)
+	fs.writeFileSync(path.join(root, 'src/routes/shared.vue'), SHARED_ROUTE)
 	// Generates routeTree.gen.ts, which main.ts imports.
 	await build({
 		root,
@@ -97,5 +124,9 @@ describe('volar plugin', () => {
 				(e) => e.includes('routes/typo.vue(4,') && e.includes('Ref<number')
 			)
 		).toBe(true)
+	})
+
+	test('scopes the block apart from <script setup>', () => {
+		expect(errors.filter((e) => e.includes('routes/shared.vue'))).toEqual([])
 	})
 })
