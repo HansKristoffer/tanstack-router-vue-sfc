@@ -1,17 +1,49 @@
 import {
 	type AnyRouter,
+	type NavigateOptions,
 	type RegisteredRouter,
+	type ToPathOption,
 	useRouter,
 	useRouterState
 } from '@tanstack/vue-router'
 import {
 	computed,
 	type Ref,
+	toValue,
 	type WatchSource,
 	type WritableComputedRef,
 	watch
 } from 'vue'
 import type { RouteRecordRaw, RouterHistory, RouterOptions } from 'vue-router'
+import { isFormStateEqual } from './form-state'
+
+/**
+ * Nuxt UI's link handler for an app without vue-router. Internal links
+ * navigate through TanStack Router; external links, a `target` and modified
+ * clicks keep the browser's behaviour.
+ *
+ * ```ts
+ * // vite.config.ts
+ * ui({ router: false })
+ * // main.ts
+ * app.use(nuxtUi, { router: nuxtUiNavigate(router) })
+ * ```
+ *
+ * In this mode a Nuxt UI link is active only when it gets `active`.
+ */
+export function nuxtUiNavigate(router: AnyRouter) {
+	return (
+		event: MouseEvent,
+		link: { href: string; external?: boolean; target?: string }
+	) => {
+		if (event.defaultPrevented || link.external) return
+		if (link.target && link.target !== '_self') return
+		if (event.button !== 0 || event.metaKey || event.ctrlKey) return
+		if (event.shiftKey || event.altKey) return
+		event.preventDefault()
+		void router.navigate({ href: link.href })
+	}
+}
 
 /**
  * Options for the vue-router instance `@nuxt/ui` expects to find (its Vue
@@ -21,6 +53,9 @@ import type { RouteRecordRaw, RouterHistory, RouterOptions } from 'vue-router'
  *
  * `app.use(createRouter(vueRouterShimOptions(createWebHistory())))` - or
  * `createMemoryHistory()` when the app is embedded and must not own the URL.
+ *
+ * @deprecated Use Nuxt UI's `router: false` mode with `nuxtUiNavigate`.
+ * Removed, with the `vue-router` peer, in the next major.
  */
 export function vueRouterShimOptions(history: RouterHistory): RouterOptions {
 	const route: RouteRecordRaw = {
@@ -31,18 +66,26 @@ export function vueRouterShimOptions(history: RouterHistory): RouterOptions {
 	return { history, routes: [route] }
 }
 
-/** Every full path of the registered route tree. */
-export type AppPath = keyof RegisteredRouter['routesByPath'] & string
+/**
+ * Every path `navigate({ to })`, `Link` and `redirect` accept for the route
+ * tree: `/admin`, not the full path `/admin/` of its index route.
+ */
+export type AppPath<TRouter extends AnyRouter = RegisteredRouter> =
+	ToPathOption<TRouter, '/', ''>
 
 /**
- * One search param from the current location, as a string. Reads through
+ * One search param from the current location, as a string (a number or a
+ * boolean the router parsed reads as it was written). Reads through
  * `useRouterState`, so it follows the URL (a `computed` over `router.state`
  * would not).
  */
 export function useQueryParam(key: string): Readonly<Ref<string | undefined>> {
 	return useRouterState({
-		select: (state) =>
-			new URLSearchParams(state.location.searchStr).get(key) ?? undefined
+		select: (state) => {
+			const value = (state.location.search as Record<string, unknown>)[key]
+			if (value === undefined) return undefined
+			return typeof value === 'string' ? value : JSON.stringify(value)
+		}
 	})
 }
 
@@ -51,13 +94,42 @@ type SearchNavigate<TSearch> = (options: {
 	replace: true
 }) => unknown
 
+/** A route object (`Route` in a single-file route): its search type is phantom. */
+type SearchRoute = {
+	types: { fullSearchSchema: unknown }
+	useSearch(): Ref<unknown>
+	useNavigate(): unknown
+}
+type SearchOf<R extends SearchRoute> = R['types']['fullSearchSchema'] &
+	Record<string, unknown>
+
 /**
  * Writable computeds over a route's typed search (mode toggles, view tabs,
  * selected ids). Reading falls back; writing navigates with `replace`.
  *
- * `const { searchModel } = useRouteSearchModels(Route.useSearch(), Route.useNavigate())`
+ * `const { searchModel } = useRouteSearchModels(Route)`, or
+ * `useRouteSearchModels(Route.useSearch(), Route.useNavigate())`.
  */
+export function useRouteSearchModels<R extends SearchRoute>(
+	route: R
+): ReturnType<typeof searchModels<SearchOf<R>>>
 export function useRouteSearchModels<TSearch extends Record<string, unknown>>(
+	search: Ref<TSearch>,
+	navigate: SearchNavigate<TSearch>
+): ReturnType<typeof searchModels<TSearch>>
+export function useRouteSearchModels<TSearch extends Record<string, unknown>>(
+	searchOrRoute: Ref<TSearch> | SearchRoute,
+	navigate?: SearchNavigate<TSearch>
+) {
+	return 'useSearch' in searchOrRoute
+		? searchModels(
+				searchOrRoute.useSearch() as Ref<TSearch>,
+				searchOrRoute.useNavigate() as SearchNavigate<TSearch>
+			)
+		: searchModels(searchOrRoute, navigate!)
+}
+
+function searchModels<TSearch extends Record<string, unknown>>(
 	search: Ref<TSearch>,
 	navigate: SearchNavigate<TSearch>
 ) {
@@ -100,7 +172,8 @@ export function useRouteSearchModels<TSearch extends Record<string, unknown>>(
 /**
  * Keep local state and the URL in step both ways: a URL change is `write`n
  * into local state, a change to `sources` `read`s local state into the URL.
- * The echo of our own write is ignored, so neither side loops.
+ * A change that the URL already holds (the echo of a URL change, however
+ * late a debounced source fires) navigates nowhere, so neither side loops.
  */
 export function useRouteSearchSync<TSearch extends Record<string, unknown>>({
 	search,
@@ -115,24 +188,20 @@ export function useRouteSearchSync<TSearch extends Record<string, unknown>>({
 	write: (search: TSearch) => void
 	sources: WatchSource<unknown>[]
 }) {
-	let applyingRouteSearch = false
-
-	watch(
-		search,
-		(next) => {
-			applyingRouteSearch = true
-			write(next)
-			queueMicrotask(() => {
-				applyingRouteSearch = false
-			})
-		},
-		{ deep: true }
-	)
+	watch(search, (next) => write(next), { deep: true })
 
 	watch(
 		sources,
 		() => {
-			if (applyingRouteSearch) return
+			const current = toValue(search) as Record<string, unknown>
+			const next = read() as Record<string, unknown>
+			if (
+				Object.keys(next).every((key) =>
+					isFormStateEqual(next[key], current[key])
+				)
+			) {
+				return
+			}
 			void navigate({
 				search: (prev) => ({ ...prev, ...read() }),
 				replace: true
@@ -145,30 +214,50 @@ export function useRouteSearchSync<TSearch extends Record<string, unknown>>({
 type NavigateArg = Parameters<AnyRouter['navigate']>[0]
 type BuildLocationArg = Parameters<AnyRouter['buildLocation']>[0]
 
+type LegacyPushOptions = {
+	params?: Record<string, string>
+	query?: Record<string, string>
+	newTab?: boolean
+}
+
 /**
- * `push('/deals/$id', { params, query, newTab })`: navigate to an app path,
- * merging `query` into the current search, or open it in a new tab.
+ * `push({ to, params, search, newTab })`: `router.navigate` with the same
+ * typed options, plus `newTab` to open the location in a new tab instead.
  * Call during setup; pass `router` to use one outside a component.
+ *
+ * `search` replaces the current search, as in `navigate`; merge with
+ * `search: (prev) => ({ ...prev, tab: 'x' })` on the same route.
  */
-export function useRouterPush(router: AnyRouter = useRouter()) {
-	return async function push(
-		to: AppPath,
-		options?: {
-			params?: Record<string, string>
-			query?: Record<string, string>
+export function useRouterPush<TRouter extends AnyRouter = RegisteredRouter>(
+	router: TRouter = useRouter() as TRouter
+) {
+	function push<
+		TTo extends string | undefined,
+		TFrom extends string = string,
+		TMaskFrom extends string = TFrom,
+		TMaskTo extends string = ''
+	>(
+		options: NavigateOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo> & {
 			newTab?: boolean
 		}
-	) {
-		const { params, query, newTab } = options ?? {}
+	): Promise<void>
+	/**
+	 * @deprecated Use `push({ to, params, search })`. `query` merges into the
+	 * current search only when `to` is the current page; another route gets
+	 * `query` alone, since its schema would reject this page's params.
+	 */
+	function push(
+		to: AppPath<TRouter>,
+		options?: LegacyPushOptions
+	): Promise<void>
+	async function push(arg: unknown, legacy?: LegacyPushOptions): Promise<void> {
+		const { newTab, ...navigation } =
+			typeof arg === 'string'
+				? legacyNavigation(arg, legacy)
+				: (arg as { newTab?: boolean })
 
 		if (newTab) {
-			// `to` is a union of paths, which collapses per-route typed `search`
-			// to `never`; cast to keep the object shape while allowing the merge.
-			const location = router.buildLocation({
-				to,
-				...(params ? { params } : {}),
-				...(query ? { search: query } : {})
-			} as BuildLocationArg)
+			const location = router.buildLocation(navigation as BuildLocationArg)
 			// The href `<Link>` renders: basepath and rewrites applied.
 			const href = location.external
 				? location.publicHref
@@ -176,17 +265,31 @@ export function useRouterPush(router: AnyRouter = useRouter()) {
 			window.open(href, '_blank', 'noopener,noreferrer')
 			return
 		}
+		await router.navigate(navigation as NavigateArg)
+	}
 
-		await router.navigate({
+	function legacyNavigation(to: string, options: LegacyPushOptions = {}) {
+		const { params, query, newTab } = options
+		const samePage =
+			query !== undefined &&
+			!newTab &&
+			router.buildLocation({ to, params } as BuildLocationArg).pathname ===
+				router.state.location.pathname
+		return {
 			to,
+			newTab,
 			...(params ? { params } : {}),
 			...(query
 				? {
-						search: (prev: Record<string, unknown>) => ({ ...prev, ...query })
+						search: samePage
+							? (prev: Record<string, unknown>) => ({ ...prev, ...query })
+							: query
 					}
 				: {})
-		} as NavigateArg)
+		}
 	}
+
+	return push
 }
 
 /**
@@ -200,10 +303,10 @@ export function searchFlag(value: unknown): true | undefined {
 }
 
 /**
- * Typed `staticData` for a route tree. TanStack's `StaticDataRouteOption` is
- * meant to be module-augmented, but it is declared in `@tanstack/router-core`,
- * which an app depending only on `@tanstack/vue-router` cannot augment - so
- * the contract lives in a value instead:
+ * Typed `staticData` as a value, with `inherited` to read the deepest match
+ * that declares a key. To type `staticData` itself, augment TanStack's
+ * interface instead - it works through `@tanstack/vue-router`, like `Register`:
+ * `declare module '@tanstack/vue-router' { interface StaticDataRouteOption { surface?: 'ink' | 'paper' } }`.
  *
  * `export const shell = defineStaticData<{ surface?: 'ink' | 'paper' }>()`,
  * `staticData: shell.define({ surface: 'ink' })` in a route, and

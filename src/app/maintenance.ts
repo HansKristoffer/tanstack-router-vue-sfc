@@ -16,9 +16,17 @@ function readHttpStatus(error: unknown): number | undefined {
 /**
  * Whether an API error means the whole API is unavailable. `null` for errors
  * the app should handle itself (4xx, 500).
+ *
+ * `fetch` rejects with a `TypeError` when the API cannot be reached, in every
+ * browser (the message differs: "Failed to fetch", "Load failed",
+ * "NetworkError when attempting to fetch resource."). A client that wraps it
+ * keeps it as `cause`. An abort is a `DOMException`, so it stays out.
  */
 export function parseApiError(error: unknown): MaintenanceState | null {
-	if (error instanceof Error && error.message.includes('Failed to fetch')) {
+	if (
+		error instanceof TypeError ||
+		(error instanceof Error && error.cause instanceof TypeError)
+	) {
 		return 'api-down'
 	}
 	return readHttpStatus(error) === 503 ? 'maintenance' : null
@@ -33,8 +41,18 @@ export function parseApiError(error: unknown): MaintenanceState | null {
  * `export const maintenance = createMaintenanceMode({ probe: () => fetch('/api/health') })`
  */
 export function createMaintenanceMode(options: {
-	/** Any request to the API. A 503 response keeps maintenance; a throw is api-down. */
+	/**
+	 * A request to the API's health route. Only an OK answer recovers; a 503
+	 * is maintenance; anything else (a proxy's 502 or 504 while the API
+	 * restarts) or a throw is api-down.
+	 */
 	probe: () => Promise<Response>
+	/**
+	 * Whether a 503 is the API's own maintenance answer, for apps whose proxy
+	 * also answers 503. Default: every 503 is.
+	 * `(response) => response.json().then((body) => body.message === 'MAINTENANCE_MODE')`
+	 */
+	isMaintenance?: (response: Response) => boolean | Promise<boolean>
 	retryIntervalSeconds?: number
 	onRecovered?: () => void
 }) {
@@ -57,14 +75,16 @@ export function createMaintenanceMode(options: {
 		checking = true
 		try {
 			const response = await options.probe()
-			if (response.status === 503) {
-				state.value = 'maintenance'
-			} else {
+			if (response.ok) {
 				state.value = null
 				stopRetrying()
 				onRecovered()
 				return
 			}
+			const maintenance =
+				response.status === 503 &&
+				(await (options.isMaintenance?.(response) ?? true))
+			state.value = maintenance ? 'maintenance' : 'api-down'
 		} catch {
 			state.value = 'api-down'
 		} finally {

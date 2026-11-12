@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown'
 
 export default defineConfig({
-	entry: { vite: 'src/vite.ts', app: 'src/app/index.ts' },
+	entry: { vite: 'src/vite.ts', app: 'src/app/index.ts', cli: 'src/cli.ts' },
 	format: ['esm'],
 	dts: true,
 	clean: true,

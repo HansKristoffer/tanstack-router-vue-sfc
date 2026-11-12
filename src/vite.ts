@@ -60,7 +60,10 @@ export function tanstackRouterSfc(
 	let routesDirectory = ''
 	let generatedRouteTreePath = ''
 
-	/** Last `<router>` block content per file, for HMR change detection. */
+	/**
+	 * What the block module was last built from, per file, for HMR change
+	 * detection: the block, and whether the file has a component.
+	 */
 	const blockCache = new Map<string, string>()
 
 	const isRouteFile = (file: string): boolean => {
@@ -75,13 +78,14 @@ export function tanstackRouterSfc(
 	const importSpecifierFor = (file: string) =>
 		`./${path.basename(file)}${ROUTER_MODULE_SUFFIX}`
 
-	const readBlockContent = (file: string): string | null => {
+	const blockKey = (file: string, source: string): string | null => {
 		try {
-			const parsed = parseRouteSfc(fs.readFileSync(file, 'utf-8'), {
-				filename: file,
-				blockType
-			})
-			return parsed.block?.content ?? null
+			const parsed = parseRouteSfc(source, { filename: file, blockType })
+			if (!parsed.block) return null
+			// Adding the first `<template>` changes the module too: it gains the
+			// `component` it did not have.
+			const component = parsed.hasTemplate || parsed.hasScriptSetup
+			return `${component ? 'component' : 'none'}:${parsed.block.content}`
 		} catch {
 			return null
 		}
@@ -192,7 +196,7 @@ export function tanstackRouterSfc(
 			ctx.server.moduleGraph.invalidateModule(mod)
 
 			const previous = blockCache.get(file)
-			const current = readBlockContent(file)
+			const current = blockKey(file, fs.readFileSync(file, 'utf-8'))
 			if (current !== null) blockCache.set(file, current)
 			if (current !== null && previous === current) return
 
@@ -252,7 +256,7 @@ export function tanstackRouterSfc(
 				)
 			}
 
-			blockCache.set(file, readBlockContent(file) ?? '')
+			blockCache.set(file, blockKey(file, source) ?? '')
 			return { code, map: null }
 		}
 	}

@@ -54,3 +54,19 @@ jobs:
       - run: bun run build
       # Fail here, not at publish time, if the tarball is missing something.
       - run: bun run verify:package
+  # The peer ranges start at 1.140.0; the generator hooks this package uses
+  # must exist there too.
+  test-lowest-peers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun add -d @tanstack/router-plugin@1.140.0 @tanstack/vue-router@1.140.0
+      - run: bun test
