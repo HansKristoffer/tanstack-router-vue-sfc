@@ -8,7 +8,9 @@ import {
 } from '@tanstack/vue-router'
 import {
 	computed,
+	onScopeDispose,
 	type Ref,
+	ref,
 	toValue,
 	type WatchSource,
 	type WritableComputedRef,
@@ -133,10 +135,23 @@ function searchModels<TSearch extends Record<string, unknown>>(
 	search: Ref<TSearch>,
 	navigate: SearchNavigate<TSearch>
 ) {
+	// Writes made in the same tick become one navigation: each navigation
+	// re-runs every matched route's `beforeLoad`.
+	let batch: Record<string, unknown> | undefined
+
 	function set(key: string, value: unknown) {
-		void navigate({
-			search: (prev) => ({ ...prev, [key]: value }),
-			replace: true
+		if (batch) {
+			batch[key] = value
+			return
+		}
+		const writes: Record<string, unknown> = { [key]: value }
+		batch = writes
+		queueMicrotask(() => {
+			batch = undefined
+			void navigate({
+				search: (prev) => ({ ...prev, ...writes }),
+				replace: true
+			})
 		})
 	}
 
@@ -153,16 +168,46 @@ function searchModels<TSearch extends Record<string, unknown>>(
 	/**
 	 * A string param as a plain `string`: empty reads and writes as an absent
 	 * param, so a cleared search box leaves no `?q=` behind.
+	 *
+	 * `debounce` (ms) is for a search box: the model holds the typed text and
+	 * the URL gets it once typing pauses, instead of one navigation per key.
 	 */
 	function textModel<K extends keyof TSearch & string>(
-		key: K
+		key: K,
+		options: { debounce?: number } = {}
 	): WritableComputedRef<string> {
+		const fromUrl = () => {
+			const value = search.value[key]
+			return typeof value === 'string' ? value : ''
+		}
+		if (!options.debounce) {
+			return computed({
+				get: fromUrl,
+				set: (value) => set(key, value || undefined)
+			})
+		}
+
+		/** Text not in the URL yet. */
+		const typed = ref<string>()
+		let timer: ReturnType<typeof setTimeout> | undefined
+		// The URL caught up, or changed under us (back button): it wins,
+		// unless the user has typed on since.
+		watch(fromUrl, () => {
+			if (!timer) typed.value = undefined
+		})
+		onScopeDispose(() => clearTimeout(timer))
+
 		return computed({
-			get: () => {
-				const value = search.value[key]
-				return typeof value === 'string' ? value : ''
-			},
-			set: (value) => set(key, value || undefined)
+			get: () => typed.value ?? fromUrl(),
+			set: (value) => {
+				typed.value = value
+				clearTimeout(timer)
+				timer = setTimeout(() => {
+					timer = undefined
+					if (value === fromUrl()) typed.value = undefined
+					else set(key, value || undefined)
+				}, options.debounce)
+			}
 		})
 	}
 
@@ -289,7 +334,98 @@ export function useRouterPush<TRouter extends AnyRouter = RegisteredRouter>(
 		}
 	}
 
-	return push
+	/**
+	 * Load a route's chunk and run its loaders ahead of the click, as `<Link>`
+	 * does on hover: `@pointerenter="push.preload({ to: '/deals/$id', params })"`.
+	 */
+	function preload<
+		TTo extends string | undefined,
+		TFrom extends string = string,
+		TMaskFrom extends string = TFrom,
+		TMaskTo extends string = ''
+	>(
+		options: NavigateOptions<TRouter, TFrom, TTo, TMaskFrom, TMaskTo>
+	): Promise<void> {
+		return router.preloadRoute(options as never).then(
+			() => {},
+			() => {}
+		)
+	}
+
+	return Object.assign(push, { preload })
+}
+
+/**
+ * Preload the route behind any internal `<a href>` on hover, focus or touch -
+ * what `<Link preload="intent">` does, for anchors TanStack does not render
+ * (Nuxt UI's `to`, markdown, plain anchors). Call once at startup; returns a
+ * function that stops it. `data-preload="false"` on an anchor opts it out.
+ */
+export function preloadOnIntent(
+	router: AnyRouter,
+	options: { target?: EventTarget; delay?: number } = {}
+) {
+	const target = options.target ?? document
+	const delay = options.delay ?? router.options.defaultPreloadDelay ?? 50
+	const base = router.basepath === '/' ? '' : router.basepath.replace(/\/$/, '')
+	let hovered: Element | null = null
+	let timer: ReturnType<typeof setTimeout> | undefined
+
+	const anchorOf = (event: Event) =>
+		event.target instanceof Element
+			? (event.target.closest('a[href]') as HTMLAnchorElement | null)
+			: null
+
+	function preload(anchor: HTMLAnchorElement) {
+		if (anchor.origin !== window.location.origin) return
+		if (anchor.target && anchor.target !== '_self') return
+		if (anchor.hasAttribute('download')) return
+		if (anchor.dataset.preload === 'false') return
+		// A `<Link>` href carries the basepath, a Nuxt UI `to` does not.
+		const pathname =
+			base && `${anchor.pathname}/`.startsWith(`${base}/`)
+				? anchor.pathname.slice(base.length) || '/'
+				: anchor.pathname
+		void router
+			.preloadRoute({ href: pathname + anchor.search + anchor.hash } as never)
+			.catch(() => {})
+	}
+
+	function onEnter(event: Event) {
+		const anchor = anchorOf(event)
+		if (!anchor || anchor === hovered) return
+		hovered = anchor
+		clearTimeout(timer)
+		// Wait, so a pointer crossing a menu does not preload every row.
+		timer = setTimeout(() => preload(anchor), delay)
+	}
+	function onLeave(event: Event) {
+		const to = (event as MouseEvent).relatedTarget
+		if (hovered && to instanceof Node && hovered.contains(to)) return
+		hovered = null
+		clearTimeout(timer)
+	}
+	function onTouch(event: Event) {
+		const anchor = anchorOf(event)
+		if (anchor) preload(anchor)
+	}
+
+	const listeners = [
+		['mouseover', onEnter],
+		['focusin', onEnter],
+		['mouseout', onLeave],
+		['focusout', onLeave],
+		['touchstart', onTouch]
+	] as const
+	for (const [type, listener] of listeners) {
+		target.addEventListener(type, listener, { passive: true })
+	}
+	return () => {
+		clearTimeout(timer)
+		for (const [type, listener] of listeners) {
+			target.removeEventListener(type, listener)
+		}
+	}
 }
 
 /**

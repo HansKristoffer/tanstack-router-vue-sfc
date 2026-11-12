@@ -30,6 +30,7 @@ import {
 	nuxtUiNavigate,
 	parseApiError,
 	parseDialogParam,
+	preloadOnIntent,
 	routeLoadingMode,
 	searchFlag,
 	setAtPath,
@@ -37,6 +38,7 @@ import {
 	useEntityForm,
 	useFormSubmit,
 	useRouterPush,
+	useRouteSearchModels,
 	useRouteSearchSync,
 	vueRouterShimOptions
 } from './index'
@@ -696,4 +698,135 @@ test('nuxtUiNavigate navigates internal plain clicks only', () => {
 	handle(click(), { href: '/deals', target: '_blank' })
 	handle(click({ defaultPrevented: true }), { href: '/deals' })
 	expect(navigate).toHaveBeenCalledTimes(1)
+})
+
+describe('useRouteSearchModels', () => {
+	function setup(initial: Record<string, unknown> = {}) {
+		const search = ref<{ q?: string; tab?: string; page?: number }>(initial)
+		const navigate = mock(
+			(options: {
+				search: (prev: typeof search.value) => typeof search.value
+			}) => {
+				search.value = options.search(search.value)
+			}
+		)
+		const scope = effectScope()
+		const models = scope.run(() => useRouteSearchModels(search, navigate))!
+		return { search, navigate, scope, ...models }
+	}
+
+	test('writes in one tick are one navigation', async () => {
+		const { search, navigate, searchModel, textModel } = setup({ page: 3 })
+		textModel('q').value = 'acme'
+		searchModel('tab', 'all').value = 'mine'
+		searchModel('page', 1).value = 1
+		expect(navigate).not.toHaveBeenCalled()
+		await Bun.sleep(0)
+		expect(navigate).toHaveBeenCalledTimes(1)
+		expect(search.value).toEqual({ q: 'acme', tab: 'mine', page: 1 })
+	})
+
+	test('a debounced text model navigates once typing pauses', async () => {
+		const { search, navigate, scope, textModel } = setup()
+		const q = textModel('q', { debounce: 20 })
+		q.value = 'a'
+		q.value = 'ac'
+		// The input shows the typed text before the URL has it.
+		expect(q.value).toBe('ac')
+		expect(navigate).not.toHaveBeenCalled()
+		await Bun.sleep(40)
+		expect(navigate).toHaveBeenCalledTimes(1)
+		expect(search.value.q).toBe('ac')
+
+		// The back button changes the URL: it wins over the old typed text.
+		search.value = { q: 'x' }
+		await nextTick()
+		expect(q.value).toBe('x')
+
+		// Typing back to what the URL holds navigates nowhere.
+		q.value = 'xy'
+		q.value = 'x'
+		await Bun.sleep(40)
+		expect(navigate).toHaveBeenCalledTimes(1)
+		scope.stop()
+	})
+})
+
+describe('preloading', () => {
+	async function setup() {
+		const loader = mock()
+		const root = createRootRoute()
+		const deals = createRoute({ getParentRoute: () => root, path: 'deals' })
+		const sessions = createRoute({
+			getParentRoute: () => root,
+			path: 'sessions',
+			loader
+		})
+		const router = createTanstackRouter({
+			routeTree: root.addChildren([deals, sessions]),
+			basepath: '/app',
+			history: createTanstackMemoryHistory({ initialEntries: ['/app/deals'] })
+		})
+		await router.load()
+		return { router, loader }
+	}
+
+	test('push.preload runs the loader without navigating', async () => {
+		const { router, loader } = await setup()
+		await useRouterPush(router).preload({ to: '/sessions' })
+		expect(loader).toHaveBeenCalledTimes(1)
+		expect(router.state.location.pathname).toBe('/deals')
+	})
+
+	test('preloadOnIntent preloads internal anchors only', async () => {
+		const { router, loader } = await setup()
+		class FakeElement {
+			constructor(readonly anchor: object | null) {}
+			closest() {
+				return this.anchor
+			}
+		}
+		const globals = globalThis as Record<string, unknown>
+		const previous = { Element: globals.Element, window: globals.window }
+		globals.Element = FakeElement
+		globals.window = { location: { origin: 'https://app.test' } }
+		const target = new EventTarget()
+		const stop = preloadOnIntent(router, { target, delay: 0 })
+		const touch = (anchor: Record<string, unknown>) => {
+			const event = new Event('touchstart')
+			Object.defineProperty(event, 'target', {
+				value: new FakeElement({
+					origin: 'https://app.test',
+					search: '',
+					hash: '',
+					target: '',
+					dataset: {},
+					hasAttribute: () => false,
+					...anchor
+				})
+			})
+			target.dispatchEvent(event)
+			return Bun.sleep(5)
+		}
+		try {
+			await touch({ pathname: '/sessions', origin: 'https://other.test' })
+			await touch({ pathname: '/sessions', target: '_blank' })
+			await touch({ pathname: '/sessions', dataset: { preload: 'false' } })
+			expect(loader).not.toHaveBeenCalled()
+			// As Nuxt UI renders it (no basepath), then as `<Link>` does.
+			await touch({ pathname: '/sessions' })
+			expect(loader).toHaveBeenCalledTimes(1)
+			await router.invalidate()
+			router.clearCache()
+			await touch({ pathname: '/app/sessions' })
+			expect(loader).toHaveBeenCalledTimes(2)
+			stop()
+			router.clearCache()
+			await touch({ pathname: '/sessions' })
+			expect(loader).toHaveBeenCalledTimes(2)
+		} finally {
+			Object.assign(globals, previous)
+		}
+		expect(router.state.location.pathname).toBe('/deals')
+	})
 })
