@@ -387,7 +387,11 @@ export function preloadOnIntent(
 				? anchor.pathname.slice(base.length) || '/'
 				: anchor.pathname
 		void router
-			.preloadRoute({ href: pathname + anchor.search + anchor.hash } as never)
+			.preloadRoute({
+				to: pathname,
+				search: router.options.parseSearch(anchor.search),
+				hash: anchor.hash.slice(1) || undefined
+			} as never)
 			.catch(() => {})
 	}
 
