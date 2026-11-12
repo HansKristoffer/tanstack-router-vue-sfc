@@ -23,9 +23,9 @@ function edit(from: string, to: string): void {
 	fs.writeFileSync(file, source.replace(from, to))
 }
 
-async function change(): Promise<Array<string>> {
+async function change(changed = file): Promise<Array<string>> {
 	sent.length = 0
-	server.watcher.emit('change', file)
+	server.watcher.emit('change', changed)
 	await new Promise((resolve) => setTimeout(resolve, 300))
 	return sent.map((payload) => payload.type)
 }
@@ -72,6 +72,17 @@ describe('handleHotUpdate', () => {
 			'/src/routes/index.vue.tsr-router.ts'
 		)
 		expect(block?.code).toContain('CHANGED_LOADER')
+	})
+
+	test('dropping or adding the only template forces a full reload', async () => {
+		// Same block, but the block module gains or loses the route component.
+		const about = path.join(root, 'src/routes/about.vue')
+		const source = fs.readFileSync(about, 'utf-8')
+		await server.transformRequest(`${about}.tsr-router.ts`)
+		fs.writeFileSync(about, source.slice(source.indexOf('<router')))
+		expect(await change(about)).toContain('full-reload')
+		fs.writeFileSync(about, source)
+		expect(await change(about)).toContain('full-reload')
 	})
 
 	test('a block that no longer parses forces a full reload', async () => {
