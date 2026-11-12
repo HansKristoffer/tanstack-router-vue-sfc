@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v2.0.0...v2.1.0) (2026-11-12)
+
+
+### Features
+
+* **app:** preload on intent, batched and debounced search writes ([#12](https://github.com/HansKristoffer/tanstack-router-vue-sfc/issues/12)) ([ab860ea](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/ab860ea5b03a0ac431c09b86d179dee2eb320f44))
+
 ## [2.0.0](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v1.1.0...v2.0.0) (2026-11-12)
 
 
