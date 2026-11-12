@@ -1,5 +1,5 @@
 import type { AnyRouter } from '@tanstack/vue-router'
-import { nextTick, type Ref, ref } from 'vue'
+import { isRef, nextTick, type Ref, ref } from 'vue'
 
 /**
  * `full` covers the whole viewport (a different layout tree), `child` only the
@@ -35,13 +35,24 @@ export function routeLoadingMode(
  * Drive `state` from the router: set on navigation start, cleared once it
  * resolves. Starts as `full` so the first navigation is covered too.
  *
- * Pass a `state` kept on `import.meta.hot.data` so an HMR update of the module
- * that calls this does not reset it mid-session.
+ * Pass `{ hot: import.meta.hot }` so an HMR update of the module that calls
+ * this keeps the state instead of resetting it mid-session, or pass your own
+ * `state`.
  */
 export function trackRouteLoading(
 	router: AnyRouter,
-	state: Ref<RouteLoadingMode | null> = ref('full')
+	stateOrOptions:
+		| Ref<RouteLoadingMode | null>
+		| { hot?: { data: Record<string, unknown> } | undefined } = {}
 ) {
+	let state: Ref<RouteLoadingMode | null>
+	if (isRef(stateOrOptions)) {
+		state = stateOrOptions
+	} else {
+		const data = stateOrOptions.hot?.data
+		state = (data?.routeLoadingState as typeof state | undefined) ?? ref('full')
+		if (data) data.routeLoadingState = state
+	}
 	const stops = [
 		router.subscribe('onBeforeNavigate', (event) => {
 			state.value = routeLoadingMode(

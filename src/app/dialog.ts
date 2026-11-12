@@ -1,8 +1,14 @@
-import { type AnyRouter, useRouter } from '@tanstack/vue-router'
+import {
+	type AnyRouter,
+	RouterContextProvider,
+	useRouter
+} from '@tanstack/vue-router'
 import {
 	type Component,
 	type ComputedRef,
 	computed,
+	type FunctionalComponent,
+	h,
 	markRaw,
 	onMounted,
 	toRaw
@@ -26,11 +32,25 @@ export type DialogDefinition<
 	data?: Data
 	/** Type-only: what the body closes with. `result: {} as { id: string }`. */
 	result?: Result
+	/**
+	 * Mirror the dialog into the search param, so a reload or a shared link
+	 * reopens it. Off by default: a URL is shared, logged and sent to
+	 * analytics, and anyone can write one.
+	 *
+	 * - `true`: the name only. A link reopens the dialog without data.
+	 * - a parser: the data too. A link reopens the dialog only with what the
+	 *   parser returns for the link's data; `undefined` or a throw opens
+	 *   nothing. `(raw) => DealDetailData.safeParse(raw).data`
+	 */
+	deepLink?: true | ((data: unknown) => Data | undefined)
 }
 
 /** The slice of Nuxt UI's `useOverlay()` the dialogs use. */
 export type DialogOverlay = {
-	create(component: Component): {
+	create(
+		component: Component,
+		options?: { destroyOnClose?: boolean }
+	): {
 		open(props?: Record<string, unknown>): { result: Promise<unknown> }
 	}
 }
@@ -41,6 +61,11 @@ type DataOf<D, Name> = D extends { name: Name; data?: infer Data }
 type ResultOf<D, Name> = D extends { name: Name; result?: infer Result }
 	? Exclude<Result, undefined>
 	: never
+/** `data` is required when the dialog's data has a required key. */
+type OpenArgs<Data> =
+	Record<never, never> extends Data
+		? [data?: Data, options?: OpenDialogOptions]
+		: [data: Data, options?: OpenDialogOptions]
 
 /** `name` or `name::<json data>` - what the dialog search param holds. */
 export function formatDialogParam(name: string, data?: unknown): string {
@@ -67,26 +92,47 @@ export function parseDialogParam(raw: string): {
 
 type OpenDialogOptions = {
 	/**
-	 * Mirror the dialog into the search param so a reload reopens it. `false`
-	 * when the page already encodes the dialog in its own param - two deep
-	 * links for one dialog open it twice.
+	 * `false` keeps a `deepLink` dialog out of the URL for this open - when
+	 * the page already encodes the dialog in its own param (two deep links
+	 * for one dialog open it twice).
 	 */
 	trackInUrl?: boolean
 }
 
+/** Nuxt UI renders overlays outside `RouterProvider`: give the host the router. */
+function withRouter(host: Component, router: AnyRouter): Component {
+	const Host: FunctionalComponent = (_props, { attrs }) =>
+		h(RouterContextProvider, { router }, () => h(host, attrs))
+	Host.inheritAttrs = false
+	return markRaw(Host)
+}
+
+/** Resolves once the router has no navigation in flight (a guard's redirect). */
+function settled(router: AnyRouter): Promise<void> {
+	if (router.state.status !== 'pending') return Promise.resolve()
+	return new Promise((resolve) => {
+		const stop = router.subscribe('onResolved', () => {
+			stop()
+			resolve()
+		})
+	})
+}
+
 /**
- * Dialogs opened by name, through Nuxt UI's overlay, and mirrored into a
- * search param (`?openDialog=dealDetail::{"id":"1"}`) so a reload or a shared
- * link reopens them.
+ * Dialogs opened by name, through Nuxt UI's overlay. A dialog whose
+ * definition has `deepLink` is mirrored into a search param
+ * (`?openDialog=dealDetail::{"dealId":"1"}`) so a reload or a shared link
+ * reopens it.
  *
  * ```ts
  * export const { useOpenDialog, useConfirmAction, useDialogDeepLink } =
  *   createDialogs({ dialogs, host: DialogSlideoverHost, useOverlay, confirm: 'confirmAction' })
  * ```
  *
- * `host` is the app's shell component. It gets `component` (the body, raw),
- * `data` (the body's props), the definition's `hostProps`, and must emit
- * `close` with the result - see `useDialogHost`.
+ * `host` is the app's shell component, rendered inside the router's context.
+ * It gets `component` (the body, raw), `data` (the body's props), the
+ * definition's `hostProps`, and must emit `close` with the result - see
+ * `useDialogHost`.
  */
 export function createDialogs<
 	const D extends ReadonlyArray<DialogDefinition>,
@@ -95,16 +141,27 @@ export function createDialogs<
 	dialogs: D
 	host: Component
 	useOverlay: () => DialogOverlay
-	/** The search param. Default `openDialog`. */
+	/** The search param. Default `openDialog`. The root route's `validateSearch` must keep it. */
 	searchKey?: string
-	/** A registered dialog that resolves `true` when confirmed, for `useConfirmAction`. */
+	/** A registered dialog that resolves `true` when confirmed, for `useConfirmAction`. Never in the URL. */
 	confirm?: Confirm
-	/** Called for a name no dialog is registered under (a stale deep link). */
+	/** Called for a link that opens nothing: an unknown name, a dialog without `deepLink`, or data its parser rejects. */
 	onUnknownDialog?: (name: string) => void
 }) {
 	const searchKey = options.searchKey ?? 'openDialog'
+	const byName = new Map<string, DialogDefinition>()
+	for (const def of options.dialogs) {
+		if (byName.has(def.name))
+			throw new Error(`createDialogs: two dialogs are named "${def.name}"`)
+		byName.set(def.name, def)
+	}
+	// Only the outermost dialog is mirrored: a dialog opened from a dialog
+	// must not overwrite, then delete, the param of the one below it.
+	let openCount = 0
 
 	function setSearchParam(router: AnyRouter, value: string | undefined) {
+		const search = router.state.location.search as Record<string, unknown>
+		if (search[searchKey] === value) return Promise.resolve()
 		// Anchor to the committed location - `to: '.'` can resolve against a
 		// pending navigation (an intent preload) and land on the wrong page.
 		return router.navigate({
@@ -119,6 +176,16 @@ export function createDialogs<
 		} as Parameters<AnyRouter['navigate']>[0])
 	}
 
+	function paramFor(
+		def: DialogDefinition,
+		data: unknown,
+		openOptions: OpenDialogOptions | undefined
+	) {
+		if (!def.deepLink || def.name === options.confirm) return undefined
+		if (openCount > 0 || openOptions?.trackInUrl === false) return undefined
+		return formatDialogParam(def.name, def.deepLink === true ? undefined : data)
+	}
+
 	/**
 	 * Open a dialog by name. Resolves with what the dialog closed with, or
 	 * `undefined` when it was dismissed or no dialog has that name. Call during setup; pass
@@ -126,39 +193,47 @@ export function createDialogs<
 	 */
 	function useOpenDialog(router: AnyRouter = useRouter()) {
 		const overlay = options.useOverlay()
+		const host = withRouter(options.host, router)
 
 		return async <N extends D[number]['name']>(
 			name: N,
-			data?: DataOf<D[number], N>,
-			openOptions?: OpenDialogOptions
+			...[data, openOptions]: OpenArgs<DataOf<D[number], N>>
 		): Promise<ResultOf<D[number], N> | undefined> => {
-			const def = options.dialogs.find((d) => d.name === name)
+			const def = byName.get(name)
 			if (!def) {
 				options.onUnknownDialog?.(name)
 				return undefined
 			}
-			const param =
-				openOptions?.trackInUrl === false
-					? undefined
-					: formatDialogParam(name, data)
-			if (param) await setSearchParam(router, param)
-
-			const { result } = overlay.create(options.host).open({
-				...def.hostProps?.(),
-				component: markRaw(def.component),
-				data
-			})
-			const value = (await result) as ResultOf<D[number], N> | undefined
-			// Awaited so the cleanup cannot race (and cancel) a navigation the
-			// caller makes as soon as the result resolves.
-			if (param) await setSearchParam(router, undefined)
-			return value
+			const param = paramFor(def, data, openOptions)
+			openCount++
+			try {
+				const { result } = overlay.create(host, { destroyOnClose: true }).open({
+					...def.hostProps?.(),
+					component: markRaw(def.component),
+					data
+				})
+				// The dialog shows first; the URL follows once the route guards ran.
+				const written = param ? setSearchParam(router, param) : undefined
+				const value = (await result) as ResultOf<D[number], N> | undefined
+				// Awaited so the cleanup cannot race (and cancel) a navigation the
+				// caller makes as soon as the result resolves.
+				if (param) {
+					await written
+					await setSearchParam(router, undefined)
+				}
+				return value
+			} finally {
+				openCount--
+			}
 		}
 	}
 
 	/** Ask, and resolve to whether the user confirmed. Needs `confirm`. */
 	function useConfirmAction(router?: AnyRouter) {
-		const open = useOpenDialog(router)
+		const open = useOpenDialog(router) as (
+			name: string,
+			data: unknown
+		) => Promise<unknown>
 		const name = options.confirm
 		if (!name)
 			throw new Error('createDialogs: pass `confirm` to use useConfirmAction()')
@@ -166,17 +241,41 @@ export function createDialogs<
 			(await open(name, data)) === true
 	}
 
-	/** Reopen the dialog the URL names. Call once in the root component's setup. */
+	/**
+	 * Reopen the dialog the URL names, once the first navigation has settled.
+	 * Call once in the root component's setup.
+	 */
 	function useDialogDeepLink(router: AnyRouter = useRouter()) {
-		const open = useOpenDialog(router)
-		onMounted(() => {
+		const open = useOpenDialog(router) as (
+			name: string,
+			data: unknown
+		) => Promise<unknown>
+		onMounted(async () => {
+			await settled(router)
 			const raw = (router.state.location.search as Record<string, unknown>)[
 				searchKey
 			]
 			if (typeof raw !== 'string' || !raw) return
-			const { name, data } = parseDialogParam(raw)
-			// The name comes from the URL; an unknown one is a no-op in `open`.
-			void open(name, data as never)
+			const { name, data: linked } = parseDialogParam(raw)
+			const def = byName.get(name)
+			let data: unknown
+			if (typeof def?.deepLink === 'function') {
+				try {
+					data = def.deepLink(linked)
+				} catch {
+					data = undefined
+				}
+			}
+			const opens =
+				def !== undefined &&
+				def.name !== options.confirm &&
+				(def.deepLink === true || data !== undefined)
+			if (!opens) {
+				await setSearchParam(router, undefined)
+				options.onUnknownDialog?.(name)
+				return
+			}
+			void open(name, data)
 		})
 	}
 

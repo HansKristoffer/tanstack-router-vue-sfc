@@ -1,5 +1,19 @@
 import { describe, expect, mock, test } from 'bun:test'
-import { createApp, effectScope, nextTick, reactive, readonly, ref } from 'vue'
+import {
+	createRootRoute,
+	createRoute,
+	createMemoryHistory as createTanstackMemoryHistory,
+	createRouter as createTanstackRouter
+} from '@tanstack/vue-router'
+import {
+	createApp,
+	createRenderer,
+	effectScope,
+	nextTick,
+	reactive,
+	readonly,
+	ref
+} from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { z } from 'zod'
 import {
@@ -13,15 +27,42 @@ import {
 	formStateFromSchema,
 	getAtPath,
 	isFormStateEqual,
+	nuxtUiNavigate,
 	parseApiError,
 	parseDialogParam,
 	routeLoadingMode,
 	searchFlag,
 	setAtPath,
+	trackRouteLoading,
 	useEntityForm,
 	useFormSubmit,
+	useRouterPush,
+	useRouteSearchSync,
 	vueRouterShimOptions
 } from './index'
+
+/** Run `setup` in a mounted component, so `onMounted` hooks fire. */
+function mountSetup(setup: () => void) {
+	const node = () => ({})
+	const { createApp } = createRenderer<object, object>({
+		createElement: node,
+		createText: node,
+		createComment: node,
+		insert: () => {},
+		remove: () => {},
+		patchProp: () => {},
+		setText: () => {},
+		setElementText: () => {},
+		parentNode: () => null,
+		nextSibling: () => null
+	})
+	createApp({
+		setup() {
+			setup()
+			return () => null
+		}
+	}).mount({})
+}
 
 describe('routeLoadingMode', () => {
 	test('a search-only change shows no loader', () => {
@@ -42,6 +83,16 @@ describe('routeLoadingMode', () => {
 		expect(routeLoadingMode('/settings', '/settings/team')).toBe('full')
 		expect(routeLoadingMode('', '/deals')).toBe('full')
 	})
+})
+
+test('trackRouteLoading keeps its state on import.meta.hot.data', () => {
+	const router = { subscribe: () => () => {} } as never
+	const hot = { data: {} as Record<string, unknown> }
+	const first = trackRouteLoading(router, { hot })
+	first.state.value = null
+	// The module re-runs after an HMR update.
+	expect(trackRouteLoading(router, { hot }).state).toBe(first.state)
+	expect(trackRouteLoading(router).state.value).toBe('full')
 })
 
 describe('searchFlag', () => {
@@ -95,7 +146,7 @@ describe('dialog search param', () => {
 		})
 	})
 
-	test('a hand-edited link with broken data still opens the dialog', () => {
+	test('a hand-edited link with broken data reads as no data', () => {
 		expect(parseDialogParam('dealDetail::{oops')).toEqual({
 			name: 'dealDetail'
 		})
@@ -104,41 +155,61 @@ describe('dialog search param', () => {
 })
 
 describe('createDialogs', () => {
-	function setup() {
-		let search: Record<string, unknown> = { tab: 'a' }
+	function setup(initial: Record<string, unknown> = { tab: 'a' }) {
+		const location = { pathname: '/deals', search: initial }
 		const navigate = mock(
 			async (options: {
 				to: string
 				search: (prev: Record<string, unknown>) => Record<string, unknown>
 			}) => {
-				search = options.search(search)
+				location.search = options.search(location.search)
 			}
 		)
 		const router = {
-			state: { location: { pathname: '/deals', search } },
+			state: { location, status: 'idle' },
 			navigate
 		} as never
-		let close: (value: unknown) => void = () => {}
+		const closers: Array<(value: unknown) => void> = []
 		const opened: Array<Record<string, unknown> | undefined> = []
+		const created: Array<unknown> = []
 		const onUnknownDialog = mock()
-		const host = { name: 'Host' }
 		const dialogs = createDialogs({
 			dialogs: [
 				{
 					name: 'confirmAction',
 					component: { name: 'Confirm' },
 					hostProps: () => ({ title: 'Sure?' }),
-					data: {} as { message: string }
-				}
+					data: {} as { message: string },
+					// Ignored: a confirm never reaches the URL.
+					deepLink: true
+				},
+				{
+					name: 'dealDetail',
+					component: { name: 'DealDetail' },
+					data: {} as { dealId: string },
+					deepLink: (raw) =>
+						typeof raw === 'object' &&
+						raw !== null &&
+						'dealId' in raw &&
+						typeof raw.dealId === 'string'
+							? { dealId: raw.dealId }
+							: undefined
+				},
+				{
+					name: 'dealCreate',
+					component: { name: 'DealCreate' },
+					deepLink: true
+				},
+				{ name: 'note', component: { name: 'Note' } }
 			],
-			host,
+			host: { name: 'Host' },
 			useOverlay: () => ({
-				create: (component) => {
-					expect(component).toBe(host)
+				create: (_component, options) => {
+					created.push(options)
 					return {
 						open: (props) => {
 							opened.push(props)
-							return { result: new Promise((r) => (close = r)) }
+							return { result: new Promise((r) => closers.push(r)) }
 						}
 					}
 				}
@@ -149,51 +220,126 @@ describe('createDialogs', () => {
 		return {
 			dialogs,
 			router,
+			navigate,
 			opened,
+			created,
 			onUnknownDialog,
-			close: (value: unknown) => close(value),
-			search: () => search
+			close: (value?: unknown) => closers.pop()?.(value),
+			search: () => location.search
 		}
 	}
 
-	test('mirrors the open dialog into the URL until it closes', async () => {
-		const { dialogs, router, opened, close, search } = setup()
-		const result = dialogs.useOpenDialog(router)('confirmAction', {
-			message: 'Delete?'
+	test('mirrors a deepLink dialog into the URL until it closes', async () => {
+		const { dialogs, router, opened, created, close, search } = setup()
+		const result = dialogs.useOpenDialog(router)('dealDetail', {
+			dealId: '1'
 		})
 		await Bun.sleep(0)
 		expect(search()).toEqual({
 			tab: 'a',
-			openDialog: 'confirmAction::{"message":"Delete?"}'
+			openDialog: 'dealDetail::{"dealId":"1"}'
 		})
-		expect(opened[0]).toMatchObject({
-			title: 'Sure?',
-			data: { message: 'Delete?' }
-		})
+		expect(opened[0]).toMatchObject({ data: { dealId: '1' } })
+		// Every open is its own overlay; it must not pile up in Nuxt UI's list.
+		expect(created).toEqual([{ destroyOnClose: true }])
 		close('done')
 		expect(await result).toBe('done')
 		expect(search()).toEqual({ tab: 'a' })
 	})
 
-	test('useConfirmAction resolves true only when confirmed', async () => {
-		const { dialogs, router, close } = setup()
+	test('a dialog without deepLink and a confirm never touch the URL', async () => {
+		const { dialogs, router, navigate, opened, close } = setup()
+		const note = dialogs.useOpenDialog(router)('note')
 		const confirmed = dialogs.useConfirmAction(router)({ message: 'Delete?' })
 		await Bun.sleep(0)
-		close(undefined)
-		expect(await confirmed).toBe(false)
+		expect(opened[1]).toMatchObject({
+			title: 'Sure?',
+			data: { message: 'Delete?' }
+		})
+		close(true)
+		expect(await confirmed).toBe(true)
+		close()
+		await note
+		expect(navigate).not.toHaveBeenCalled()
+	})
+
+	test('a dialog opened from a dialog leaves the outer one in the URL', async () => {
+		const { dialogs, router, close, search } = setup()
+		const open = dialogs.useOpenDialog(router)
+		const outer = open('dealCreate')
+		await Bun.sleep(0)
+		const inner = open('dealDetail', { dealId: '2' })
+		await Bun.sleep(0)
+		expect(search().openDialog).toBe('dealCreate')
+		close()
+		await inner
+		expect(search().openDialog).toBe('dealCreate')
+		close()
+		await outer
+		expect(search().openDialog).toBeUndefined()
+	})
+
+	test('trackInUrl: false keeps one open out of the URL', async () => {
+		const { dialogs, router, navigate, close } = setup()
+		const result = dialogs.useOpenDialog(router)('dealCreate', undefined, {
+			trackInUrl: false
+		})
+		close()
+		await result
+		expect(navigate).not.toHaveBeenCalled()
 	})
 
 	test('an unknown name opens nothing', async () => {
 		const { dialogs, router, opened, onUnknownDialog } = setup()
-		expect(await dialogs.useOpenDialog(router)('gone' as never)).toBeUndefined()
+		const open = dialogs.useOpenDialog(router) as (name: string) => unknown
+		expect(await open('gone')).toBeUndefined()
 		expect(opened).toEqual([])
 		expect(onUnknownDialog).toHaveBeenCalledWith('gone')
+	})
+
+	describe('useDialogDeepLink', () => {
+		async function openFromUrl(param: string) {
+			const ctx = setup({ tab: 'a', openDialog: param })
+			mountSetup(() => ctx.dialogs.useDialogDeepLink(ctx.router))
+			await Bun.sleep(0)
+			return ctx
+		}
+
+		test('reopens a deepLink dialog with the data its parser returns', async () => {
+			const { opened, search } = await openFromUrl(
+				'dealDetail::{"dealId":"1","extra":"x"}'
+			)
+			expect(opened[0]).toMatchObject({ data: { dealId: '1' } })
+			expect(search().openDialog).toBe('dealDetail::{"dealId":"1"}')
+		})
+
+		for (const [why, param] of [
+			['a confirm', 'confirmAction::{"message":"Your session expired"}'],
+			['a dialog without deepLink', 'note'],
+			['data the parser rejects', 'dealDetail::{"dealId":1}'],
+			['an unknown name', 'gone']
+		]) {
+			test(`opens nothing for ${why} and clears the param`, async () => {
+				const { opened, search, onUnknownDialog } = await openFromUrl(
+					param as string
+				)
+				expect(opened).toEqual([])
+				expect(search()).toEqual({ tab: 'a' })
+				expect(onUnknownDialog).toHaveBeenCalledTimes(1)
+			})
+		}
 	})
 })
 
 describe('maintenance mode', () => {
 	test('parseApiError picks out what means the API is unavailable', () => {
 		expect(parseApiError(new TypeError('Failed to fetch'))).toBe('api-down')
+		// Safari and Firefox word it differently; wrapped clients keep the cause.
+		expect(parseApiError(new TypeError('Load failed'))).toBe('api-down')
+		expect(
+			parseApiError(new Error('oRPC', { cause: new TypeError('x') }))
+		).toBe('api-down')
+		expect(parseApiError(new DOMException('aborted', 'AbortError'))).toBeNull()
 		expect(parseApiError({ status: 503 })).toBe('maintenance')
 		expect(parseApiError({ code: 503 })).toBe('maintenance')
 		expect(parseApiError({ status: 500 })).toBeNull()
@@ -227,6 +373,33 @@ describe('maintenance mode', () => {
 			expect(maintenance.isActive.value).toBe(false)
 			expect(maintenance.nextRetryIn.value).toBe(0)
 			expect(onRecovered).toHaveBeenCalledTimes(1)
+		} finally {
+			maintenance.stop()
+		}
+	})
+
+	test("only an OK answer recovers; a proxy's 502 is api-down", async () => {
+		const responses = [
+			new Response(null, { status: 502 }),
+			new Response('{"message":"BAD_GATEWAY"}', { status: 503 }),
+			new Response('{"message":"MAINTENANCE_MODE"}', { status: 503 })
+		]
+		const onRecovered = mock()
+		const maintenance = createMaintenanceMode({
+			probe: async () => responses.shift()!,
+			isMaintenance: async (response) =>
+				(await response.json()).message === 'MAINTENANCE_MODE',
+			onRecovered
+		})
+		try {
+			maintenance.trigger('maintenance')
+			await maintenance.retryNow()
+			expect(maintenance.isApiDown.value).toBe(true)
+			await maintenance.retryNow()
+			expect(maintenance.isApiDown.value).toBe(true)
+			await maintenance.retryNow()
+			expect(maintenance.isMaintenance.value).toBe(true)
+			expect(onRecovered).not.toHaveBeenCalled()
 		} finally {
 			maintenance.stop()
 		}
@@ -414,4 +587,113 @@ describe('save scope', () => {
 		expect(controller.dirtyCount.value).toBe(1)
 		scope.stop()
 	})
+})
+
+describe('useRouterPush', () => {
+	async function setup() {
+		const root = createRootRoute()
+		// Like a zod schema with `.loose()`: unknown keys stay.
+		const validateSearch = (search: Record<string, unknown>) => search
+		const deals = createRoute({
+			getParentRoute: () => root,
+			path: 'deals',
+			validateSearch
+		})
+		const sessions = createRoute({
+			getParentRoute: () => root,
+			path: 'sessions',
+			validateSearch
+		})
+		const router = createTanstackRouter({
+			routeTree: root.addChildren([deals, sessions]),
+			history: createTanstackMemoryHistory({
+				initialEntries: ['/deals?view=mine']
+			})
+		})
+		await router.load()
+		return { router, push: useRouterPush(router) }
+	}
+
+	test('replaces the search, as navigate does', async () => {
+		const { router, push } = await setup()
+		await push({ to: '/sessions', search: { session: 's1' } })
+		expect(router.state.location.href).toBe('/sessions?session=s1')
+	})
+
+	test("the legacy query never carries this page's search to another route", async () => {
+		const { router, push } = await setup()
+		await push('/deals', { query: { sort: 'amount' } })
+		expect(router.state.location.search).toEqual({
+			view: 'mine',
+			sort: 'amount'
+		})
+		await push('/sessions', { query: { session: 's1' } })
+		expect(router.state.location.search).toEqual({ session: 's1' })
+	})
+
+	test('newTab opens the built href instead of navigating', async () => {
+		const { router, push } = await setup()
+		const open = mock()
+		const previous = globalThis.window
+		globalThis.window = { open } as never
+		try {
+			await push({ to: '/sessions', search: { session: 's1' }, newTab: true })
+		} finally {
+			globalThis.window = previous
+		}
+		expect(open).toHaveBeenCalledWith(
+			'/sessions?session=s1',
+			'_blank',
+			'noopener,noreferrer'
+		)
+		expect(router.state.location.pathname).toBe('/deals')
+	})
+})
+
+test('useRouteSearchSync skips a write the URL already holds', async () => {
+	const search = ref<{ q?: string }>({ q: 'a' })
+	const local = ref('a')
+	const navigate = mock()
+	const scope = effectScope()
+	scope.run(() =>
+		useRouteSearchSync({
+			search,
+			navigate,
+			read: () => ({ q: local.value }),
+			write: (next) => {
+				local.value = next.q ?? ''
+			},
+			sources: [local]
+		})
+	)
+	// A URL change (back button) is written locally, and not echoed back...
+	search.value = { q: 'b' }
+	await nextTick()
+	await Bun.sleep(0)
+	expect(local.value).toBe('b')
+	expect(navigate).not.toHaveBeenCalled()
+	// ...but an edit is.
+	local.value = 'c'
+	await nextTick()
+	expect(navigate).toHaveBeenCalledTimes(1)
+	scope.stop()
+})
+
+test('nuxtUiNavigate navigates internal plain clicks only', () => {
+	const navigate = mock()
+	const handle = nuxtUiNavigate({ navigate } as never)
+	const click = (init: Partial<MouseEvent> = {}) => {
+		const event = { button: 0, preventDefault: mock(), ...init }
+		return event as unknown as MouseEvent
+	}
+	const plain = click()
+	handle(plain, { href: '/deals' })
+	expect(plain.preventDefault).toHaveBeenCalled()
+	expect(navigate).toHaveBeenCalledWith({ href: '/deals' })
+
+	handle(click({ metaKey: true }), { href: '/deals' })
+	handle(click(), { href: 'https://x.dev', external: true })
+	handle(click(), { href: '/deals', target: '_blank' })
+	handle(click({ defaultPrevented: true }), { href: '/deals' })
+	expect(navigate).toHaveBeenCalledTimes(1)
 })

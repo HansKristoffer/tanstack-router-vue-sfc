@@ -1,8 +1,15 @@
 import { expectTypeOf, test } from 'bun:test'
+import {
+	createRootRoute,
+	createRoute,
+	createRouter
+} from '@tanstack/vue-router'
 import { type Ref, ref } from 'vue'
 import {
+	type AppPath,
 	createDialogs,
 	useFormSubmit,
+	useRouterPush,
 	useRouteSearchModels,
 	useSettingsFormSection
 } from './index'
@@ -16,7 +23,11 @@ export function dialogTypes() {
 			{
 				name: 'dealDetail',
 				component: {},
-				data: {} as { dealId: string }
+				data: {} as { dealId: string },
+				deepLink: (raw) =>
+					typeof raw === 'object' && raw && 'dealId' in raw
+						? { dealId: String(raw.dealId) }
+						: undefined
 			},
 			{
 				name: 'dealCreate',
@@ -41,7 +52,9 @@ export function dialogTypes() {
 	expectTypeOf(open('dealCreate')).resolves.toEqualTypeOf<
 		{ id: string } | undefined
 	>()
-	expectTypeOf(open('dealDetail')).resolves.toBeUnknown()
+	expectTypeOf(open('dealDetail', { dealId: '1' })).resolves.toBeUnknown()
+	// @ts-expect-error - dealDetail needs its data
+	void open('dealDetail')
 
 	const confirm = useConfirmAction()
 	expectTypeOf(confirm({ message: 'Sure?' })).resolves.toBeBoolean()
@@ -96,4 +109,51 @@ export function searchModelTypes(search: Ref<{ view?: 'list' | 'grid' }>) {
 	searchModel('tab', 'a')
 	// @ts-expect-error - not a search key
 	textModel('q')
+}
+
+const root = createRootRoute()
+const admin = createRoute({ getParentRoute: () => root, path: 'admin' })
+const adminIndex = createRoute({ getParentRoute: () => admin, path: '/' })
+const agent = createRoute({
+	getParentRoute: () => root,
+	path: 'agents/$agentId',
+	validateSearch: (search: Record<string, unknown>) => ({
+		tab: search.tab === 'runs' ? ('runs' as const) : undefined
+	})
+})
+const router = createRouter({
+	routeTree: root.addChildren([admin.addChildren([adminIndex]), agent])
+})
+
+export function routerPushTypes() {
+	const push = useRouterPush(router)
+	void push({ to: '/admin' })
+	// @ts-expect-error - the full path of an index route is not a `to`
+	void push({ to: '/admin/' })
+	// @ts-expect-error - the route needs its params
+	void push({ to: '/agents/$agentId' })
+	void push({
+		to: '/agents/$agentId',
+		params: { agentId: '1' },
+		search: { tab: 'runs' },
+		newTab: true
+	})
+	void push({
+		to: '/agents/$agentId',
+		params: { agentId: '1' },
+		// @ts-expect-error - not a value the route's search takes
+		search: { tab: 'logs' }
+	})
+
+	expectTypeOf<AppPath<typeof router>>().toEqualTypeOf<
+		'/' | '/admin' | '/agents/$agentId'
+	>()
+	void push('/admin', { query: { q: 'a' } })
+	// @ts-expect-error - the legacy form takes the same paths
+	void push('/admin/')
+}
+
+export function searchModelsFromRoute() {
+	const { searchModel } = useRouteSearchModels(agent)
+	expectTypeOf(searchModel('tab', 'all').value).toEqualTypeOf<'runs' | 'all'>()
 }
