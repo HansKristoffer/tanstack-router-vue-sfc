@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.0](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v1.1.0...v2.0.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* dialogs are no longer mirrored into the URL by default; add `deepLink` (true, or a parser for the data) to each dialog a link should reopen. The confirm dialog and nested dialogs are never mirrored, and a link reopens a dialog only with data its parser accepts. `useRouterPush` takes router.navigate's typed options; its deprecated positional `query` merges into the current search only on the same page. `AppPath` is the `to` union (`/admin`, not `/admin/`). `open(name)` without data no longer compiles for a dialog whose data has a required key. Maintenance mode recovers only on an OK probe answer.
+
+### Features
+
+* **app:** add nuxtUiNavigate for Nuxt UI's router: false mode and deprecate vueRouterShimOptions ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* **app:** useRouteSearchModels(Route) and trackRouteLoading(router, { hot }) ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* **cli:** add tanstack-router-sfc generate and --check ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* platform review fixes: safe dialog deep links, typed useRouterPush, route tree CLI ([#10](https://github.com/HansKristoffer/tanstack-router-vue-sfc/issues/10)) ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* **volar:** reject &lt;script setup&gt; names used inside the router block ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+
+
+### Bug Fixes
+
+* **app:** maintenance mode treats a proxy's 502 as api-down and recognises a failed fetch in every browser ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* **app:** useQueryParam reads the parsed search value ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* **app:** useRouteSearchSync no longer echoes a URL change back after a debounced source ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+* **vite:** reload when a route gains or loses its only template ([1e77898](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/1e778981f09088a66b56929e793eec749c170bbf))
+
 ## [1.1.0](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v1.0.2...v1.1.0) (2026-10-20)
 
 
