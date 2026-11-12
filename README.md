@@ -55,6 +55,8 @@ export default defineConfig({
 }
 ```
 
+vue-tsc, golar and the VS Code Vue extension all read this entry.
+
 `tanstackRouterSfc` wraps `tanstackRouter` from `@tanstack/router-plugin`, so
 it takes the same options (`routesDirectory`, `generatedRouteTree`,
 `autoCodeSplitting`, `codeSplittingOptions`, `plugins`, ...) plus `blockType`
@@ -63,6 +65,22 @@ it takes the same options (`routesDirectory`, `generatedRouteTree`,
 Peer dependencies: `vite`, `vue`, `@tanstack/router-plugin`,
 `@tanstack/vue-router`.
 
+### The route tree
+
+The Vite plugin writes `routeTree.gen.ts` when the dev server or a build
+starts, and again when a route file changes. Typecheck and unit tests read it
+without Vite, so commit it. A route added without running either fails the
+typecheck on its `createFileRoute('...')` path.
+
+The `tanstack-router-sfc` command writes the same file without Vite, with
+options from `tsr.config.json` (a CLI cannot see inline Vite options):
+
+```sh
+tanstack-router-sfc generate                         # write it; exit 1 on a generator error
+tanstack-router-sfc generate --check                 # exit 1 if it was out of date (for CI)
+tanstack-router-sfc generate --root apps/platform    # the Vite root, default: the current directory
+```
+
 ## Rules
 
 - The block must be `<router lang="ts">` and must
@@ -70,9 +88,18 @@ Peer dependencies: `vite`, `vue`, `@tanstack/router-plugin`,
   a string-literal path. `__root.vue` uses `createRootRoute*` instead.
 - A stale path after a rename is **fixed in place** by the generator, the same
   way it fixes `.ts` route files.
+- **The block is its own module at runtime.** It shares only `Route` with the
+  rest of the file. A value both halves need (a search schema, a constant)
+  lives in a third module that each imports. The typechecker enforces most of
+  this: the block's own declarations are not visible in `<script setup>`, and
+  a `<script setup>` import or top-level declaration used in the block is a
+  type error naming `ImportThisInTheRouterBlock`. One gap is left: a value the
+  block imports is visible to `<script setup>` in the typechecker, and is a
+  `ReferenceError` there at runtime. Import it in `<script setup>` too.
 - `Route` is available in `<script setup>` without an import. It is *not*
-  available in `<template>` (it is a `<script>` binding, like any plain
-  `<script>` value) - assign it to a `const` in setup if the template needs it.
+  available in `<template>`: the typechecker rejects it and it is `undefined`
+  in dev (a production build happens to inline it - do not rely on that).
+  Assign what the template needs to a `const` in setup.
 - An SFC with a `<template>` or `<script setup>` becomes the route's
   `component`, loaded lazily. A block-only `.vue` (redirect or pathless layout)
   gets no component.
@@ -83,8 +110,8 @@ Peer dependencies: `vite`, `vue`, `@tanstack/router-plugin`,
 
 ## How it works
 
-Route generation, file watching, formatting, code splitting and route HMR are
-the official `tanstackRouter` plugin's job - this composes it with
+Route generation, file watching, formatting and code splitting are the
+official `tanstackRouter` plugin's job - this composes it with
 `addExtensions: true`, so the generated tree imports `./routes/x.vue` and
 TypeScript can see the block's default-exported route as `Route`. On top of that:
 
@@ -101,20 +128,25 @@ TypeScript can see the block's default-exported route as `Route`. On top of that
    padded to the original line numbers, plus
    `Route.update({ component: lazyRouteComponent(() => import('./x.vue')) })`.
 
-`volar.cjs` splices the block into the SFC's generated TypeScript so `vue-tsc`
-(and golar, and the VS Code Vue extension) typecheck it in place.
+`volar.cjs` splices the block into the SFC's generated TypeScript so vue-tsc,
+golar and the VS Code Vue extension typecheck it in place.
 
 ### HMR
 
 Editing `<template>` / `<script setup>` / `<style>` hot-updates as usual.
-Editing the `<router>` block triggers a full reload - the router is built once
-at startup, so a changed route definition cannot be swapped in place.
+Editing the `<router>` block, or adding or removing a route's only
+`<template>`, triggers a full reload. The official plugin swaps a `.ts`
+route's options in place, but it does not recognise the block's module yet.
 
-### Note on `autoCodeSplitting`
+### Code splitting
 
-Single-file routes are split by construction, so you do not need it for them.
-It is passed through to the official plugin unchanged, which is what still
-splits inline `component:` options in `.ts` route files.
+The route component of a single-file route is split by construction, so you do
+not need `autoCodeSplitting` for it. The block itself is not: every block, and
+everything it imports, is in the entry chunk, because the route tree imports
+it. Keep heavy imports out of blocks, or load them with `import()` inside the
+loader. `autoCodeSplitting` is passed through to the official plugin
+unchanged, which is what still splits inline `component:` options in `.ts`
+route files.
 
 ## App kit: `tanstack-router-sfc/app`
 
@@ -125,12 +157,114 @@ it runs in, or takes a `router`.
 
 | Area | Exports |
 |---|---|
-| Nuxt UI on TanStack Router | `vueRouterShimOptions(history)` - `app.use(createRouter(vueRouterShimOptions(createWebHistory())))` |
-| URL search state | `useQueryParam`, `useRouteSearchModels`, `useRouteSearchSync`, `useRouterPush`, `searchFlag`, `defineStaticData` |
-| Route loading | `routeLoadingMode`, `trackRouteLoading(router)` |
-| Dialogs opened by URL | `createDialogs({ dialogs, host, useOverlay, confirm })` -> `useOpenDialog`, `useConfirmAction`, `useDialogDeepLink`; `useDialogHost` for the host component |
-| Maintenance / API down | `createMaintenanceMode({ probe })`, `parseApiError` |
-| Forms | `formStateFromSchema`, `useEntityForm`, `useFormSubmit`, `useSettingsFormSection`, `provideSaveScope` / `useSaveSection`, `useFormFieldModel`, `useFieldHighlight`, `formStateKey`, `formIdKey` |
+| Nuxt UI links | `nuxtUiNavigate(router)`; `vueRouterShimOptions(history)` (deprecated) |
+| URL search state | `useRouteSearchModels`, `useRouteSearchSync`, `useQueryParam`, `searchFlag` |
+| Navigation | `useRouterPush`, `AppPath`, `defineStaticData` |
+| Route loading | `trackRouteLoading(router, { hot })`, `routeLoadingMode` |
+| Dialogs | `createDialogs` -> `useOpenDialog`, `useConfirmAction`, `useDialogDeepLink`; `useDialogHost`; `formatDialogParam`, `parseDialogParam` |
+| Maintenance / API down | `createMaintenanceMode`, `parseApiError` |
+| Forms | `formStateFromSchema`, `assignFormState`, `isFormStateEqual`, `getAtPath`, `setAtPath`, `useEntityForm`, `useFormSubmit`, `useSettingsFormSection`, `useFormFieldModel`, `useFieldHighlight`, `useResolvedFormId`, `formStateKey`, `formIdKey`, `formFeedbackKey` |
+| Save scope | `provideSaveScope`, `useSaveSection`, `createSaveScope`, `useSaveScopeController`, `useOptionalSaveScopeController` |
+
+`vue-router` (the deprecated shim) and `zod` (`formStateFromSchema` types)
+are optional peer dependencies; the kit imports neither at runtime.
+
+### Nuxt UI links
+
+Nuxt UI looks for vue-router unless it is told not to. Turn that off and hand
+it TanStack Router's navigation (checked against Nuxt UI 4.10); then `to` on
+a Nuxt UI component navigates through TanStack Router. That `to` is a plain
+string: for a typed path, use TanStack's `Link`.
+
+```ts
+// vite.config.ts
+ui({ router: false })
+// main.ts
+app.use(nuxtUi, { router: nuxtUiNavigate(router) })
+```
+
+In this mode a Nuxt UI link is active only when it gets `active`, and its
+anchor's `href` is the `to` as written, without the router's basepath.
+
+### Search state
+
+- `useRouteSearchModels(Route)`: writable computeds over the route's typed
+  search (`searchModel('tab', 'all')`, `textModel('q')`). The URL is the only
+  store; each write is one `replace` navigation.
+- `useRouteSearchSync`: for state that lives in another object (a filter
+  store). URL changes are written into it, its changes are read back into the
+  URL; a change the URL already holds navigates nowhere.
+- `useQueryParam(key)`: one param as a string, from anywhere in a component.
+- `useRouterPush()`: `router.navigate` with the same typed options, plus
+  `newTab`. `push({ to: '/agents/$agentId', params: { agentId }, newTab: true })`.
+
+`AppPath` is the union of paths `navigate({ to })` accepts (`/admin`, not the
+`/admin/` full path of its index route).
+
+### Route loading
+
+```ts
+export const routeLoading = trackRouteLoading(router, { hot: import.meta.hot })
+// routeLoading.state: 'full' | 'child' | null
+```
+
+### Dialogs
+
+```ts
+export const { useOpenDialog, useConfirmAction, useDialogDeepLink } = createDialogs({
+	dialogs: [
+		{ name: 'confirmAction', component: ConfirmAction, data: {} as ConfirmData },
+		{
+			name: 'dealDetail',
+			component: defineAsyncComponent(() => import('./DealDetail.vue')),
+			data: {} as { dealId: string },
+			hostProps: () => ({ title: t('deals.detail') }),
+			// Reopened from a link only with data that parses.
+			deepLink: (raw) => DealDetailData.safeParse(raw).data
+		},
+		{ name: 'dealCreate', component: DealCreate, deepLink: true }
+	],
+	host: DialogSlideoverHost,
+	useOverlay,
+	confirm: 'confirmAction'
+})
+```
+
+- `open(name, data)` resolves with what the dialog closed with. `data` is
+  required when the dialog's data has a required key.
+- Only a dialog with `deepLink` is written to the URL
+  (`?openDialog=dealDetail::{"dealId":"1"}`), so a reload or a shared link
+  reopens it. The confirm dialog and a dialog opened from another dialog never
+  are. `open(name, data, { trackInUrl: false })` keeps one open out of it.
+- Call `useDialogDeepLink()` once in the root component's setup. It waits for
+  the first navigation, then opens what the URL names. An unknown name, a
+  dialog without `deepLink`, or data its parser rejects opens nothing, clears
+  the param and calls `onUnknownDialog`.
+- The root route's `validateSearch` must keep the param
+  (`openDialog: z.string().optional()`), or a schema strips it.
+- `host` is the app's shell. It renders inside the router's context and gets
+  `component` (the body), `data` (the body's props) and the definition's
+  `hostProps`; it emits `close` with the result. `useDialogHost(props, emit)`
+  has its logic.
+
+### Maintenance / API down
+
+```ts
+export const maintenance = createMaintenanceMode({
+	probe: () => fetch('/api/health', { cache: 'no-store' }),
+	// Only when a proxy can also answer 503:
+	isMaintenance: async (response) => (await response.json()).message === 'MAINTENANCE_MODE'
+})
+// in the API client's error handler
+maintenance.triggerFromError(error)
+```
+
+While active it probes every `retryIntervalSeconds` (15). Only an OK answer
+recovers (by default with a reload); a 503 is maintenance; anything else - a
+proxy's 502 while the API restarts - or a network error is API down. Point
+`probe` at a route that answers OK when healthy.
+
+### Forms
 
 Toasts and translations are the app's: provide them once.
 
@@ -146,8 +280,22 @@ app.provide(formFeedbackKey, () => {
 })
 ```
 
-`vue-router` (the shim) and `zod` (`formStateFromSchema` types) are optional
-peer dependencies; the kit imports neither at runtime.
+## Upgrading from 1.x
+
+- **Dialogs are no longer in the URL by default.** Add `deepLink` to each
+  dialog that a link should reopen: `true` for one without data, a parser for
+  one with data. The confirm dialog and nested dialogs are never mirrored, so
+  `trackInUrl: false` on those calls can go. `open(name)` without data no
+  longer compiles for a dialog whose data has a required key.
+- **`useRouterPush`** takes `router.navigate`'s options:
+  `push('/deals/$id', { params, query })` becomes
+  `push({ to: '/deals/$id', params, search })`. The positional form still
+  works (deprecated), but its `query` now merges into the current search only
+  when `to` is the current page.
+- **`AppPath`** is the `to` union: `'/admin/'` becomes `'/admin'`.
+- **Maintenance mode** recovers only on an OK answer. A `probe` URL that
+  answers 404 or 401 when healthy must point at a health route.
+- **`vueRouterShimOptions`** is deprecated: switch to `nuxtUiNavigate`.
 
 ## Development
 
