@@ -4,6 +4,9 @@
   "description": "TanStack Router for Vue with single-file routes: define the route in a <router lang=\"ts\"> block inside the .vue file that renders it.",
   "type": "module",
   "main": "./dist/vite.mjs",
+  "bin": {
+    "tanstack-router-sfc": "./dist/cli.mjs"
+  },
   "types": "./dist/vite.d.mts",
   "exports": {
     ".": {
