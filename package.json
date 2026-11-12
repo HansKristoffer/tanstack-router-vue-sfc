@@ -73,11 +73,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",
+    "@golar/vue": "^0.1.11",
     "@tanstack/router-plugin": "^1.168.23",
     "@tanstack/vue-router": "^1.170.17",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.8",
+    "golar": "^0.1.11",
     "husky": "^9.1.7",
     "tsdown": "^0.22.14",
     "typescript": "^6.0.3",

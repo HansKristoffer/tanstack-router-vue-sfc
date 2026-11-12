@@ -21,6 +21,12 @@
  * declarations stay block-scoped while `var` lifts `Route` out. Imports cannot
  * move into braces, so an import both halves make is kept once instead.
  *
+ * The braces do not stop the block from seeing `<script setup>`'s imports and
+ * top-level declarations, which do not exist in the block's module at runtime
+ * (a `ReferenceError` when the route loads). So the braces open by shadowing
+ * each of those names with a value of type `ImportThisInTheRouterBlock`, and a
+ * call, property access or typed use of one is a type error in the block.
+ *
  * CommonJS on purpose: both hosts load plugins with `require`.
  *
  * Register it in tsconfig.json:
@@ -46,6 +52,9 @@ const SCRIPT_CODE_ID = /^script_(ts|js|tsx|jsx)$/
  * @typedef {{ node: import('typescript').Node, local: string, imported: string, from: string, typeOnly: boolean }} Binding
  */
 
+// Whitespace and comments, which is all the trivia a statement can lead with.
+const TRIVIA = /(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/y
+
 /**
  * Start of a node without its leading trivia. golar's TypeScript build creates
  * nodes without the prototype methods (`getStart`), so fall back to scanning.
@@ -53,13 +62,11 @@ const SCRIPT_CODE_ID = /^script_(ts|js|tsx|jsx)$/
  * @param {import('typescript').Node} node
  */
 function startOf(sourceFile, node) {
-	return typeof node.getStart === 'function'
-		? node.getStart(sourceFile)
-		: skipTrivia(sourceFile.text, node.pos)
+	if (typeof node.getStart === 'function') return node.getStart(sourceFile)
+	TRIVIA.lastIndex = node.pos
+	TRIVIA.exec(sourceFile.text)
+	return TRIVIA.lastIndex
 }
-
-/** @type {(text: string, pos: number) => number} */
-let skipTrivia
 
 /**
  * Enum members as literals: vue-tsc hands plugins a `typescript` whose enums
@@ -179,12 +186,57 @@ function rangesToDrop(ts, sourceFile, statement, dropped) {
 	return ranges.sort((a, b) => a[0] - b[0])
 }
 
+/**
+ * Names a binding pattern (`a`, `{ a, b: [c] }`) declares.
+ * @param {typeof import('typescript')} ts
+ * @param {import('typescript').BindingName} name
+ * @param {Set<string>} into
+ */
+function addBindingNames(ts, name, into) {
+	if (ts.isIdentifier(name)) {
+		into.add(nameOf(ts, name))
+		return
+	}
+	for (const element of name.elements) {
+		if (!ts.isOmittedExpression(element))
+			addBindingNames(ts, element.name, into)
+	}
+}
+
+/**
+ * Value names a script binds at its top level: imports and declarations.
+ * @param {typeof import('typescript')} ts
+ * @param {import('typescript').SourceFile} sourceFile
+ * @param {{ typeImports: boolean }} options
+ */
+function topLevelNames(ts, sourceFile, options) {
+	/** @type {Set<string>} */
+	const names = new Set()
+	for (const statement of sourceFile.statements) {
+		if (ts.isImportDeclaration(statement)) {
+			for (const binding of bindingsOf(ts, statement)) {
+				if (options.typeImports || !binding.typeOnly) names.add(binding.local)
+			}
+		} else if (ts.isVariableStatement(statement)) {
+			for (const declaration of statement.declarationList.declarations) {
+				addBindingNames(ts, declaration.name, names)
+			}
+		} else if (
+			(ts.isFunctionDeclaration(statement) ||
+				ts.isClassDeclaration(statement) ||
+				ts.isEnumDeclaration(statement)) &&
+			statement.name
+		) {
+			names.add(nameOf(ts, statement.name))
+		}
+	}
+	return names
+}
+
 /** @type {import('@vue/language-core').VueLanguagePlugin<{ blockType?: string }>} */
 const plugin = (ctx) => {
 	const blockType = ctx.config.blockType ?? 'router'
 	const ts = ctx.modules.typescript
-	// Internal, so missing from the typings - but exported by every build.
-	skipTrivia = /** @type {any} */ (ts).skipTrivia
 
 	return {
 		version: 2.2,
@@ -208,16 +260,25 @@ const plugin = (ctx) => {
 			)
 			at = at === -1 ? 1 : at + 1
 
-			// What the SFC's own scripts already import, at the same module scope.
+			// What the SFC's own scripts already import, at the same module scope,
+			// and every value name they bind there.
 			/** @type {Map<string, Binding>} */
 			const imported = new Map()
+			/** @type {Set<string>} */
+			const scriptNames = new Set()
 			for (const script of [ir.script, ir.scriptSetup]) {
 				if (!script) continue
-				for (const statement of parse(ts, script.content).statements) {
+				const scriptFile = parse(ts, script.content)
+				for (const statement of scriptFile.statements) {
 					if (!ts.isImportDeclaration(statement)) continue
 					for (const binding of bindingsOf(ts, statement)) {
 						imported.set(binding.local, binding)
 					}
+				}
+				for (const name of topLevelNames(ts, scriptFile, {
+					typeImports: false
+				})) {
+					scriptNames.add(name)
 				}
 			}
 			const alreadyImported = (/** @type {Binding} */ binding) => {
@@ -290,12 +351,27 @@ const plugin = (ctx) => {
 			}
 			body.push(...mapped(cursor, content.length))
 
+			// Names the scripts bind that the block does not bind itself.
+			const blockNames = topLevelNames(ts, sourceFile, { typeImports: true })
+			const shadowed = [...scriptNames].filter(
+				(name) => name !== 'Route' && !blockNames.has(name)
+			)
+			const shadows =
+				shadowed.length === 0
+					? []
+					: [
+							'interface ImportThisInTheRouterBlock { readonly __tsrRouterBlockIsItsOwnModule: never }\n',
+							`const ${shadowed.map((name) => `${name}: ImportThisInTheRouterBlock = null as never`).join(', ')};\n`,
+							`void [${shadowed.join(', ')}];\n`
+						]
+
 			embeddedCode.content.splice(
 				at,
 				0,
 				'\n',
 				...imports,
 				'{\n',
+				...shadows,
 				...body,
 				'\n}\n',
 				...(bound ? ['export { Route }\n'] : [])
