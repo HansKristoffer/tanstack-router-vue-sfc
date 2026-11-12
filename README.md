@@ -158,6 +158,7 @@ it runs in, or takes a `router`.
 | Area | Exports |
 |---|---|
 | Nuxt UI links | `nuxtUiNavigate(router)`; `vueRouterShimOptions(history)` (deprecated) |
+| Preloading | `preloadOnIntent(router)`, `useRouterPush().preload` |
 | URL search state | `useRouteSearchModels`, `useRouteSearchSync`, `useQueryParam`, `searchFlag` |
 | Navigation | `useRouterPush`, `AppPath`, `defineStaticData` |
 | Route loading | `trackRouteLoading(router, { hot })`, `routeLoadingMode` |
@@ -200,6 +201,39 @@ anchor's `href` is the `to` as written, without the router's basepath.
 
 `AppPath` is the union of paths `navigate({ to })` accepts (`/admin`, not the
 `/admin/` full path of its index route).
+
+Every search write is a navigation, and a navigation re-runs each matched
+route's `beforeLoad`. So writes made in the same tick go out as one
+navigation, and a search box should debounce:
+`textModel('q', { debounce: 250 })` holds the typed text and writes the URL
+once typing pauses.
+
+### Faster navigation
+
+`defaultPreload: 'intent'` only covers TanStack's `<Link>`. Three things make
+the rest of the app load before the click:
+
+```ts
+// main.ts - every internal <a href> (Nuxt UI's `to`, markdown) preloads on
+// hover, focus or touch. `data-preload="false"` opts an anchor out.
+preloadOnIntent(router)
+```
+
+```vue
+<!-- a row or button that navigates in code -->
+<tr @pointerenter="push.preload({ to: '/deals/$dealId', params: { dealId } })"
+    @click="push({ to: '/deals/$dealId', params: { dealId } })">
+```
+
+```ts
+// in the <router> block: start the page's queries with the navigation (or
+// the preload), instead of after the page chunk has loaded and mounted.
+// Not awaited, so the page still renders at once; `useQuery` picks it up.
+export default createFileRoute('/deals/$dealId')({
+	loader: ({ context, params }) =>
+		void context.queryClient.prefetchQuery(dealQuery(params.dealId))
+})
+```
 
 ### Route loading
 

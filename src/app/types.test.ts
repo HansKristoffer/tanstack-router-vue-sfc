@@ -148,6 +148,9 @@ export function routerPushTypes() {
 	expectTypeOf<AppPath<typeof router>>().toEqualTypeOf<
 		'/' | '/admin' | '/agents/$agentId'
 	>()
+	void push.preload({ to: '/admin' })
+	// @ts-expect-error - preload takes the same typed options
+	void push.preload({ to: '/admin/' })
 	void push('/admin', { query: { q: 'a' } })
 	// @ts-expect-error - the legacy form takes the same paths
 	void push('/admin/')
