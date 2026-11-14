@@ -77,9 +77,42 @@ options from `tsr.config.json` (a CLI cannot see inline Vite options):
 
 ```sh
 tanstack-router-sfc generate                         # write it; exit 1 on a generator error
-tanstack-router-sfc generate --check                 # exit 1 if it was out of date (for CI)
+tanstack-router-sfc generate --check                 # write it; exit 1 if it was out of date (for CI)
 tanstack-router-sfc generate --root apps/platform    # the Vite root, default: the current directory
 ```
+
+`--check` regenerates the file as well as failing: after a failed check the
+tree on disk is the current one, ready to commit.
+
+### knip
+
+knip reads a `.vue` file's `<script>` blocks only, so an export used solely
+inside a `<router>` block is reported as unused. Give knip a Vue compiler that
+reads the block too (checked against knip 6.45):
+
+```ts
+// knip.ts
+compilers: {
+	vue: (text: string) =>
+		[
+			...text.matchAll(
+				/<(script|router)\b(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/\1>/g
+			)
+		]
+			.map(([, block, code]) =>
+				block === 'router'
+					? code.replace('export default ', 'export const Route = ')
+					: code
+			)
+			.join(';\n')
+}
+```
+
+The route tree imports each block's default export as `Route`; without the
+rename knip reports every route file's `default` export as unused. The tag
+pattern steps over quoted attributes, because `generic="T extends Foo<any>"`
+has a `>` inside the tag. With a custom `blockType`, put its name where
+`router` is.
 
 ## Rules
 

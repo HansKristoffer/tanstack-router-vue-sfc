@@ -24,6 +24,7 @@
     "dist",
     "volar.cjs",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
