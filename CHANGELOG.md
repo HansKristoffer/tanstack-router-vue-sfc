@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v2.1.0...v2.1.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* ship CHANGELOG.md in the npm package ([#14](https://github.com/HansKristoffer/tanstack-router-vue-sfc/issues/14)) ([d66b37c](https://github.com/HansKristoffer/tanstack-router-vue-sfc/commit/d66b37ccce7ec73c67080e74a252e1e308101164))
+
 ## [2.1.0](https://github.com/HansKristoffer/tanstack-router-vue-sfc/compare/v2.0.0...v2.1.0) (2026-11-12)
 
 
